@@ -1,0 +1,196 @@
+
+#include <iostream>
+#include <fstream>
+#include <vector>
+#include <string>
+
+struct Object
+{
+	std::string name, type, class_, parentBody;
+	double radius, mass, hydrogenMass;
+	std::vector<double> position;
+	std::vector<double> velocity;
+
+	//used for stars
+	bool isStar;
+	int temp;
+	double luminosity;
+};
+std::vector<Object> object;
+
+void getData(std::ifstream &);
+
+
+
+
+int main()
+{
+	std::string starFileName, planetFileName, holder;
+
+	std::ifstream inputFile("input/simulation.json");
+	if (!inputFile)
+	{
+		std::cout << "\nThere was an error opening the simulation file! Make sure it is placed in the \"input\" folder!\n";
+		return 0;
+	}
+
+	// This finds the "Name": part of the sinulation file and uses it for star and planet .sc files
+	while (inputFile >> holder && holder != "},");
+	while (inputFile >> holder && holder != "},");
+	std::getline(inputFile, holder);
+	std::getline(inputFile, holder);
+	starFileName = holder;
+	starFileName.erase(0, 8);
+	starFileName.erase(starFileName.size() - 2, 2);
+	planetFileName = starFileName;
+	starFileName = "output/" + starFileName + " Star.sc";
+	planetFileName = "output/" + planetFileName + " Planet.sc";
+
+	std::ofstream starFile(starFileName.c_str());
+	std::ofstream planetFile(planetFileName.c_str());
+
+	getData(inputFile);
+
+
+	
+	std::cout << "\nsuccess!\n";
+
+	inputFile.close();
+	starFile.close();
+	planetFile.close();
+	return 0;
+}
+
+void getData(std::ifstream& inputFile)
+{
+	std::string holder;
+	std::string::size_type sz;
+
+	while (inputFile >> holder && holder != "\"$type\":\"Body\",");
+	while (true)
+	{
+		Object temp;
+
+		// finds name
+		while (inputFile >> holder && holder != "\"$type\":\"Body\",");
+		if (holder == "}")
+			return;
+		std::getline(inputFile, holder);
+		std::getline(inputFile, holder);
+		holder.erase(0, 8);
+		holder.erase(holder.size() - 2, 2);
+		temp.name = holder;
+
+		// find temperature
+		while (inputFile >> holder && !(holder.find("\"SurfaceTemperature\":") + 1));
+		holder.erase(0, 21);
+		temp.temp = std::stoi(holder, &sz);
+
+		// find luminosity
+		while (inputFile >> holder && !(holder.find("\"Luminosity\":") + 1));
+		holder.erase(0, 13);
+		temp.luminosity = std::stod(holder, &sz);
+		temp.luminosity = (temp.luminosity / (3.827 * pow(10, 26))); // converts watts to solar lum
+
+		// determine if it is a star
+		while (inputFile >> holder && !(holder.find("\"StarType\":") + 1));
+		holder.erase(0, 11);
+		temp.isStar = std::stoi(holder, &sz);
+
+		// find ID/Hydrogen
+		while (inputFile >> holder && (!(holder.find("\"Id\":") + 1) && holder != "\"Hydrogen\":{"));
+		if (holder == "\"Hydrogen\":{")
+		{
+			// find hydrogen mass
+			while (inputFile >> holder && !(holder.find("\"Mass\":") + 1));
+			holder.erase(0, 7);
+			temp.hydrogenMass = std::stod(holder, &sz);
+			temp.hydrogenMass = (temp.hydrogenMass / (5.9736 * pow(10, 24))); // converts kg to earth masses
+
+			while (inputFile >> holder && !(holder.find("\"Id\":") + 1));
+		}
+
+		// find mass
+		while (inputFile >> holder && !(holder.find("\"Mass\":") + 1));
+		holder.erase(0, 7);
+		temp.mass = std::stod(holder, &sz);
+		temp.mass = (temp.mass / (5.9736 * pow(10, 24))); // converts kg to earth masses
+
+		// find radius
+		while (inputFile >> holder && !(holder.find("\"Radius\":") + 1));
+		holder.erase(0, 9);
+		temp.radius = std::stod(holder, &sz);
+		temp.radius /= 1000; // m to km
+
+		std::string y, z;
+		// find position and add x y z to vector
+		while (inputFile >> holder && !(holder.find("\"Position\":") + 1));
+		holder.erase(0, 12);
+		y = holder.substr(holder.find(";"));
+		y.erase(0, 1);
+		z = y.substr(y.find(";"));
+		z.erase(0, 1);
+		temp.position.push_back(std::stod(holder, &sz)); // x
+		temp.position.push_back(std::stod(y, &sz)); // y
+		temp.position.push_back(std::stod(z, &sz)); // z
+
+		// find velocity and add x y z to vector
+		while (inputFile >> holder && !(holder.find("\"Velocity\":") + 1));
+		holder.erase(0, 12);
+		y = holder.substr(holder.find(";"));
+		y.erase(0, 1);
+		z = y.substr(y.find(";"));
+		z.erase(0, 1);
+		temp.velocity.push_back(std::stod(holder, &sz)); // x
+		temp.velocity.push_back(std::stod(y, &sz)); // y
+		temp.velocity.push_back(std::stod(z, &sz)); // z
+
+		// find category / type
+		while (inputFile >> holder && !(holder.find("\"Category\":") + 1));
+		holder.erase(0, 12);
+		holder.erase(holder.size() - 1, 1);
+		temp.type = holder;
+		
+		if (temp.isStar == true)
+		{
+			temp.type = "Star";
+			temp.class_ = "";
+		}
+		else if (temp.type == "star")
+		{
+			temp.type = "Star";
+			temp.class_ = "";
+		}
+		else if (temp.type == "planet")
+		{
+			temp.type = "Planet";
+			if (temp.hydrogenMass / temp.mass > 0.01)
+				temp.class_ = "Jupiter";
+			else
+				temp.class_ = "Terra";
+		}
+		else if (temp.type == "moon")
+		{
+			if (temp.radius > 200)
+				temp.type = "Moon";
+			else
+				temp.type = "DwarfMoon";
+			temp.class_ = "Terra";
+		}
+		else if (temp.type == "sso")
+		{
+			temp.type = "Asteroid";
+			temp.class_ = "Asteroid";
+		}
+		else if (temp.type == "blackhole")
+		{
+			temp.type = "Star";
+			temp.class_ = "X";
+		}
+			
+
+
+		object.push_back(temp);
+		temp.hydrogenMass = 0;
+	}
+}
