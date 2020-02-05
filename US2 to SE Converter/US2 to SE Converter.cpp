@@ -6,14 +6,15 @@
 
 struct Object
 {
-	std::string name, type, class_, parentBody;
-	double radius, mass, hydrogenMass;
+	std::string name, type, class_;
+	double mass, radius;
+	int temp;
 	std::vector<double> position;
 	std::vector<double> velocity;
+	double age, ironMass, waterMass, hydrogenMass, surfacePressure, greenhouse;
 
 	//used for stars
 	bool isStar;
-	int temp;
 	double luminosity;
 };
 std::vector<Object> object;
@@ -66,10 +67,12 @@ void getData(std::ifstream& inputFile)
 	std::string holder;
 	std::string::size_type sz;
 
-	while (inputFile >> holder && holder != "\"$type\":\"Body\",");
 	while (true)
 	{
 		Object temp;
+		temp.ironMass = 0;
+		temp.waterMass = 0;
+		temp.hydrogenMass = 0;
 
 		// finds name
 		while (inputFile >> holder && holder != "\"$type\":\"Body\",");
@@ -82,9 +85,29 @@ void getData(std::ifstream& inputFile)
 		temp.name = holder;
 
 		// find temperature
-		while (inputFile >> holder && !(holder.find("\"SurfaceTemperature\":") + 1));
+		while (inputFile >> holder && !(holder.find("\"SurfaceTemperature\":") + 1) && !(holder.find("\"Id\":") + 1));
+		if (holder.find("\"Id\":") + 1) // If an object does not have a temperature, it skips the next few iitems because they don't exist either
+		{
+			temp.temp = 0;
+			temp.greenhouse = 0;
+			temp.surfacePressure = 0;
+			temp.luminosity = 0;
+			temp.isStar = false;
+			goto NoTemperature;
+		}	
 		holder.erase(0, 21);
 		temp.temp = std::stoi(holder, &sz);
+
+		// find greenhouse
+		while (inputFile >> holder && !(holder.find("\"GreenhouseEffect\":") + 1));
+		holder.erase(0, 19);
+		temp.greenhouse = std::stod(holder, &sz);
+
+		// find surface pressure
+		while (inputFile >> holder && !(holder.find("\"SurfacePressure\":") + 1));
+		holder.erase(0, 18);
+		temp.surfacePressure = std::stod(holder, &sz);
+		temp.surfacePressure /= 101325;
 
 		// find luminosity
 		while (inputFile >> holder && !(holder.find("\"Luminosity\":") + 1));
@@ -97,8 +120,37 @@ void getData(std::ifstream& inputFile)
 		holder.erase(0, 11);
 		temp.isStar = std::stoi(holder, &sz);
 
-		// find ID/Hydrogen
-		while (inputFile >> holder && (!(holder.find("\"Id\":") + 1) && holder != "\"Hydrogen\":{"));
+		// find molten level
+		while (inputFile >> holder && !(holder.find("\"MoltenLevel\":") + 1));
+		// Find mass composition, if it exists
+		while (inputFile >> holder && 
+			holder != "\"Iron\":{" && holder != "\"Water\":{" && holder != "\"Hydrogen\":{" && 
+			(!(holder.find("\"Id\":") + 1)));
+		// if the mass is 100% silicate, the next part is skipped over
+		if (holder == "\"Iron\":{")
+		{
+			// find iron mass
+			while (inputFile >> holder && !(holder.find("\"Mass\":") + 1));
+			holder.erase(0, 7);
+			temp.ironMass = std::stod(holder, &sz);
+			temp.ironMass = (temp.ironMass / (5.9736 * pow(10, 24))); // converts kg to earth masses
+
+			while (inputFile >> holder &&
+				holder != "\"Water\":{" && holder != "\"Hydrogen\":{" &&
+				(!(holder.find("\"Id\":") + 1)));
+		}
+		if (holder == "\"Water\":{")
+		{
+			// find water mass
+			while (inputFile >> holder && !(holder.find("\"Mass\":") + 1));
+			holder.erase(0, 7);
+			temp.waterMass = std::stod(holder, &sz);
+			temp.waterMass = (temp.waterMass / (5.9736 * pow(10, 24))); // converts kg to earth masses
+
+			while (inputFile >> holder &&
+				holder != "\"Hydrogen\":{" &&
+				(!(holder.find("\"Id\":") + 1)));
+		}
 		if (holder == "\"Hydrogen\":{")
 		{
 			// find hydrogen mass
@@ -107,9 +159,16 @@ void getData(std::ifstream& inputFile)
 			temp.hydrogenMass = std::stod(holder, &sz);
 			temp.hydrogenMass = (temp.hydrogenMass / (5.9736 * pow(10, 24))); // converts kg to earth masses
 
-			while (inputFile >> holder && !(holder.find("\"Id\":") + 1));
+			while (inputFile >> holder && (!(holder.find("\"Id\":") + 1)));
 		}
+		NoTemperature:;
 
+		// find age
+		while (inputFile >> holder && !(holder.find("\"Age\":") + 1));
+		holder.erase(0, 6);
+		temp.age = std::stod(holder, &sz);
+		temp.age /= 31557600000000000;
+		
 		// find mass
 		while (inputFile >> holder && !(holder.find("\"Mass\":") + 1));
 		holder.erase(0, 7);
@@ -151,12 +210,7 @@ void getData(std::ifstream& inputFile)
 		holder.erase(holder.size() - 1, 1);
 		temp.type = holder;
 		
-		if (temp.isStar == true)
-		{
-			temp.type = "Star";
-			temp.class_ = "";
-		}
-		else if (temp.type == "star")
+		if (temp.isStar == true || temp.type == "star")
 		{
 			temp.type = "Star";
 			temp.class_ = "";
@@ -165,9 +219,21 @@ void getData(std::ifstream& inputFile)
 		{
 			temp.type = "Planet";
 			if (temp.hydrogenMass / temp.mass > 0.01)
-				temp.class_ = "Jupiter";
+			{
+				if (temp.waterMass / temp.mass > 0.3)
+					temp.class_ = "Neptune";
+				else
+					temp.class_ = "Jupiter";
+			}
 			else
-				temp.class_ = "Terra";
+			{
+				if (temp.waterMass > 0.05)
+					temp.class_ = "Aquaria";
+				else if (temp.ironMass / temp.mass > 0.3)
+					temp.class_ = "Ferria";
+				else
+					temp.class_ = "Terra";
+			}
 		}
 		else if (temp.type == "moon")
 		{
@@ -175,12 +241,32 @@ void getData(std::ifstream& inputFile)
 				temp.type = "Moon";
 			else
 				temp.type = "DwarfMoon";
-			temp.class_ = "Terra";
+
+			if (temp.waterMass / temp.mass > 0.05)
+				temp.class_ = "Aquaria";
+			else if (temp.ironMass / temp.mass > 0.3)
+				temp.class_ = "Ferria";
+			else
+				temp.class_ = "Terra";
 		}
 		else if (temp.type == "sso")
 		{
-			temp.type = "Asteroid";
-			temp.class_ = "Asteroid";
+			if (temp.radius > 200)
+			{
+				temp.type = "DwarfPlanet";
+
+				if (temp.waterMass / temp.mass > 0.05)
+					temp.class_ = "Aquaria";
+				else if (temp.ironMass / temp.mass > 0.3)
+					temp.class_ = "Ferria";
+				else
+					temp.class_ = "Terra";
+			}
+			else
+			{
+				temp.type = "Asteroid";
+				temp.class_ = "Asteroid";
+			}
 		}
 		else if (temp.type == "blackhole")
 		{
@@ -191,6 +277,10 @@ void getData(std::ifstream& inputFile)
 
 
 		object.push_back(temp);
-		temp.hydrogenMass = 0;
 	}
+
+
+
+
+
 }
