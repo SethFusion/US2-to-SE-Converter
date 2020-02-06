@@ -3,24 +3,33 @@
 #include <fstream>
 #include <vector>
 #include <string>
+#include <math.h>
 
 struct Object
 {
 	std::string name, type, class_;
 	double mass, radius;
 	int temp;
-	std::vector<double> position;
-	std::vector<double> velocity;
 	double age, ironMass, waterMass, hydrogenMass, surfacePressure, greenhouse;
+
+	//orbit stuff
+	std::string parentBody;
+	std::vector<double> position, velocity;
+	double semimajor, eccentricity, argOfperiapsis, longOfAscNode, inclination, meanAnomaly;
 
 	//used for stars
 	bool isStar;
 	double luminosity;
 };
+std::string::size_type sz;
 std::vector<Object> object;
+double G; // gravitation constant
 
-void getData(std::ifstream &);
-void printObject(std::ofstream &, Object &);
+void getData(std::ifstream&);
+void printObject(std::ofstream&, Object&);
+
+// math functions
+double distance(Object&, Object&);
 
 int main()
 {
@@ -34,7 +43,7 @@ int main()
 		return 0;
 	}
 
-	// This finds the "Name": part of the sinulation file and uses it for star and planet .sc files
+	// finds the "Name": part of the simulation file and uses it for star and planet .sc files
 	while (inputFile >> holder && holder != "},");
 	while (inputFile >> holder && holder != "},");
 	std::getline(inputFile, holder);
@@ -46,8 +55,79 @@ int main()
 	starFileName = "output/" + starFileName + " Star.sc";
 	planetFileName = "output/" + planetFileName + " Planet.sc";
 
+	// finds gravitational constant
+	while (inputFile >> holder && !(holder.find("\"Gravity\":") + 1));
+	holder.erase(0, 10);
+	G = std::stod(holder, &sz);
+
 	getData(inputFile);
 	inputFile.close();
+
+
+	std::vector<Object> star, planet, moon;
+	int size = object.size() - 1;
+	for (int i = 0; i < size; i++)
+	{
+		if (object.at(i).type == "Moon" || object.at(i).type == "DwarfMoon" || object.at(i).type == "Asteroid")
+			moon.push_back(object.at(i));
+		else if (object.at(i).type == "Planet" || object.at(i).type == "DwarfPlanet")
+			planet.push_back(object.at(i));
+		else if (object.at(i).type == "Star")
+			star.push_back(object.at(i));
+	}
+
+	for (int i = 0; i < planet.size() - 1; i++)
+	{
+		double F = 0.0; // force of the current star on the current planet
+		int parent = 0; // positon of the most attractive star
+		for (int j = 0; j < star.size() - 1; j++)
+		{
+			double f = (G * pow(planet.at(i).mass, 2) * pow(star.at(j).mass, 2)) / pow(distance(planet.at(i), star.at(j)), 2);
+			// checks the current star's force with the largest known force
+			// If the current star's force is larger than any others, the parent
+			// is set to the current star
+			if (f > F)
+			{
+				F = f;
+				parent = j;
+			}
+		}
+		planet.at(i).parentBody = star.at(parent).name;
+	}
+
+
+
+
+	// next thing to do is caluclate hill sphere of each planet, so you can use it to test for moons
+
+
+
+
+
+
+	// F = G (m¹m²/r²)
+
+
+	//std::cout << "\n\n" << distance(star.at(0), planet.at(2)) << "\n\n";
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 	std::cout << " Do you want an empty star file for your system?"
 		<< "\n\n"
@@ -105,10 +185,20 @@ void printObject(std::ofstream& f, Object & o)
 		<< "\n}\n\n";
 	return;
 }
+
+double distance(Object& A, Object& B)
+{
+	// finds the distance between two objects in 3d space
+	double x, y, z;
+	x = pow(B.position.at(0) - A.position.at(0), 2);
+	y = pow(B.position.at(1) - A.position.at(1), 2);
+	z = pow(B.position.at(2) - A.position.at(2), 2);
+	return sqrt(x + y + z);
+}
+
 void getData(std::ifstream& inputFile)
 {
 	std::string holder;
-	std::string::size_type sz;
 
 	while (true)
 	{
@@ -176,7 +266,7 @@ void getData(std::ifstream& inputFile)
 			while (inputFile >> holder && !(holder.find("\"Mass\":") + 1));
 			holder.erase(0, 7);
 			temp.ironMass = std::stod(holder, &sz);
-			temp.ironMass = (temp.ironMass / (5.9736 * pow(10, 24))); // converts kg to earth masses
+			//temp.ironMass = (temp.ironMass / (5.9736 * pow(10, 24))); // converts kg to earth masses
 
 			while (inputFile >> holder &&
 				holder != "\"Water\":{" && holder != "\"Hydrogen\":{" &&
@@ -188,7 +278,7 @@ void getData(std::ifstream& inputFile)
 			while (inputFile >> holder && !(holder.find("\"Mass\":") + 1));
 			holder.erase(0, 7);
 			temp.waterMass = std::stod(holder, &sz);
-			temp.waterMass = (temp.waterMass / (5.9736 * pow(10, 24))); // converts kg to earth masses
+			//temp.waterMass = (temp.waterMass / (5.9736 * pow(10, 24))); // converts kg to earth masses
 
 			while (inputFile >> holder &&
 				holder != "\"Hydrogen\":{" &&
@@ -200,7 +290,7 @@ void getData(std::ifstream& inputFile)
 			while (inputFile >> holder && !(holder.find("\"Mass\":") + 1));
 			holder.erase(0, 7);
 			temp.hydrogenMass = std::stod(holder, &sz);
-			temp.hydrogenMass = (temp.hydrogenMass / (5.9736 * pow(10, 24))); // converts kg to earth masses
+			//temp.hydrogenMass = (temp.hydrogenMass / (5.9736 * pow(10, 24))); // converts kg to earth masses
 
 			while (inputFile >> holder && (!(holder.find("\"Id\":") + 1)));
 		}
@@ -216,7 +306,7 @@ void getData(std::ifstream& inputFile)
 		while (inputFile >> holder && !(holder.find("\"Mass\":") + 1));
 		holder.erase(0, 7);
 		temp.mass = std::stod(holder, &sz);
-		temp.mass = (temp.mass / (5.9736 * pow(10, 24))); // converts kg to earth masses
+		//temp.mass = (temp.mass / (5.9736 * pow(10, 24))); // converts kg to earth masses
 
 		// find radius
 		while (inputFile >> holder && !(holder.find("\"Radius\":") + 1));

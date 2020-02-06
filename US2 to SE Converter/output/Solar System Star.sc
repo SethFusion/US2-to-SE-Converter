@@ -1,0 +1,2 @@
+StarBarycenter		"Solar System"
+{}
