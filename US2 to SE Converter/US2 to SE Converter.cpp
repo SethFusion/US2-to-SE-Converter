@@ -5,9 +5,20 @@
 #include <string>
 #include <math.h>
 
-struct StateVect
+class StateVect
 {
+public:
 	double x, y, z;
+
+	double value()
+	{
+		return (x + y + z);
+	}
+
+	double magnitude()
+	{
+		return (sqrt(pow(x, 2) + pow(y, 2) + pow(z, 2)));
+	}
 };
 
 
@@ -34,14 +45,14 @@ std::string::size_type sz;
 std::vector<Object> object;
 double G; // gravitation constant
 
-void getData(std::ifstream&);
-void printObject(std::ofstream&, Object&);
+void GetData(std::ifstream&);
+void PrintObject(std::ofstream&, Object&);
 
 // math functions
-double distance(Object&, Object&);
-void calcOrbit(Object&);
-StateVect calcMomentumVector(StateVect&, StateVect&);
-double determinate(std::vector<double>&);
+double Distance(Object&, Object&);
+void CalcOrbit(Object&);
+StateVect CrossProduct(StateVect&, StateVect&);
+double Determinate(std::vector<double>&);
 
 int main()
 {
@@ -72,7 +83,7 @@ int main()
 	holder.erase(0, 10);
 	G = std::stod(holder, &sz);
 
-	getData(inputFile);
+	GetData(inputFile);
 	inputFile.close();
 
 
@@ -94,7 +105,7 @@ int main()
 		int parent = 0; // positon of the most attractive star
 		for (int j = 0; j < star.size(); j++)
 		{
-			double f = (G * pow(planet.at(i).mass, 2) * pow(star.at(j).mass, 2)) / pow(distance(planet.at(i), star.at(j)), 2);
+			double f = (G * pow(planet.at(i).mass, 2) * pow(star.at(j).mass, 2)) / pow(Distance(planet.at(i), star.at(j)), 2);
 			// checks the current star's attractive force with the largest known force
 			// If the current star's force is larger than any others, the parent
 			// is set to the current star
@@ -105,17 +116,17 @@ int main()
 			}
 		}
 		planet.at(i).parentBody = &star.at(parent);
-		planet.at(i).hillSphereRadius = distance(planet.at(i), star.at(parent)) * (cbrt(planet.at(i).mass / (3 * star.at(parent).mass)));
+		planet.at(i).hillSphereRadius = Distance(planet.at(i), star.at(parent)) * (cbrt(planet.at(i).mass / (3 * star.at(parent).mass)));
 	}
 
-	std::cout << "\n\n\t" << distance(planet.at(0), star.at(0)) << "\t" << (cbrt(planet.at(0).mass / (3 * star.at(0).mass))) << "\n\n";
+	std::cout << "\n\n\t" << Distance(planet.at(0), star.at(0)) << "\t" << (cbrt(planet.at(0).mass / (3 * star.at(0).mass))) << "\n\n";
 
 	// looks for binary planet systems
 	for (int i = 0; i < planet.size(); i++)
 	{
 		for (int j = 0; j < planet.size(); j++)
 		{
-			double dist = distance(planet.at(i), planet.at(j));
+			double dist = Distance(planet.at(i), planet.at(j));
 			if (dist < planet.at(i).hillSphereRadius && dist != 0)
 			{
 				planet.at(i).parentBody = &planet.at(j);
@@ -130,7 +141,7 @@ int main()
 	{
 		for (int j = 0; j < planet.size(); j++)
 		{
-			if (distance(moon.at(i), planet.at(j)) < planet.at(j).hillSphereRadius)
+			if (Distance(moon.at(i), planet.at(j)) < planet.at(j).hillSphereRadius)
 			{
 				moon.at(i).parentBody = &planet.at(j);
 			}
@@ -143,7 +154,7 @@ int main()
 			int parent = 0;
 			for (int j = 0; j < star.size(); j++)
 			{
-				double f = (G * pow(moon.at(i).mass, 2) * pow(star.at(j).mass, 2)) / pow(distance(moon.at(i), star.at(j)), 2);
+				double f = (G * pow(moon.at(i).mass, 2) * pow(star.at(j).mass, 2)) / pow(Distance(moon.at(i), star.at(j)), 2);
 				if (f > F)
 				{
 					F = f;
@@ -161,7 +172,7 @@ int main()
 	// this is where the magic happens
 	for (int i = 0; i < planet.size(); i++)
 	{
-		calcOrbit(planet.at(i));
+		CalcOrbit(planet.at(i));
 	}
 
 
@@ -199,7 +210,7 @@ int main()
 	std::ofstream planetFile(planetFileName.c_str());
 	for (int i = 0; i < object.size() - 1; i++)
 	{
-		printObject(planetFile, object.at(i));
+		PrintObject(planetFile, object.at(i));
 	}
 
 	std::cout << "\n Conversion complete! Look in the \"output\" folder\n to find your files.\n ";
@@ -209,7 +220,7 @@ int main()
 	return 0;
 }
 
-void printObject(std::ofstream& f, Object & o)
+void PrintObject(std::ofstream& f, Object & o)
 {
 	
 	if (!(o.type == "Star"))
@@ -240,7 +251,33 @@ void printObject(std::ofstream& f, Object & o)
 	return;
 }
 
-double distance(Object& A, Object& B)
+void CalcOrbit(Object& obj)
+{
+	double mu = G * obj.parentBody->mass;
+	StateVect eccentVect;
+
+	StateVect momentVect;
+	// step 1: caculate the momentum vector h
+	momentVect = CrossProduct(obj.position, obj.velocity);
+
+	// calcuate eccentricity vector
+	StateVect VcrossH = CrossProduct(obj.velocity, momentVect);
+	eccentVect.x = ((VcrossH.x / mu) - (obj.position.value() / obj.position.magnitude()));
+	eccentVect.y = ((VcrossH.y / mu) - (obj.position.value() / obj.position.magnitude()));
+	eccentVect.z = ((VcrossH.z / mu) - (obj.position.value() / obj.position.magnitude()));
+
+	obj.eccentricity = eccentVect.magnitude();
+
+	return;
+}
+
+
+
+
+
+
+
+double Distance(Object& A, Object& B)
 {
 	// finds the distance between two objects in 3d space
 	double x, y, z;
@@ -250,18 +287,7 @@ double distance(Object& A, Object& B)
 	return sqrt(x + y + z);
 }
 
-void calcOrbit(Object& obj)
-{
-	StateVect momentVect, eccentVect;
-	// step 1: caculate the momentum vector h
-	momentVect = calcMomentumVector(obj.position, obj.velocity);
-
-
-	calcMomentumVector(obj.velocity, momentVect);
-
-}
-
-StateVect calcMomentumVector(StateVect& pos, StateVect& vel)
+StateVect CrossProduct(StateVect& pos, StateVect& vel)
 {
 	StateVect cross;
 	std::vector<double> i, j, k;
@@ -281,18 +307,18 @@ StateVect calcMomentumVector(StateVect& pos, StateVect& vel)
 	k.push_back(vel.x);
 	k.push_back(vel.y);
 
-	cross.x = determinate(i);
-	cross.y = (determinate(j) * -1.0);
-	cross.z = determinate(k);
+	cross.x = Determinate(i);
+	cross.y = (Determinate(j) * -1.0);
+	cross.z = Determinate(k);
 	return cross;
 }
 
-double determinate(std::vector<double>& vect)
+double Determinate(std::vector<double>& vect)
 {
 	return ((vect.at(0) * vect.at(3)) - (vect.at(1) * vect.at(2)));
 }
 
-void getData(std::ifstream& inputFile)
+void GetData(std::ifstream& inputFile)
 {
 	std::string holder;
 	
