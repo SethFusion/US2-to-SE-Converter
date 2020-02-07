@@ -5,6 +5,12 @@
 #include <string>
 #include <math.h>
 
+struct StateVect
+{
+	double x, y, z;
+};
+
+
 struct Object
 {
 	std::string name, type, class_;
@@ -14,7 +20,7 @@ struct Object
 
 	// orbit stuff
 	Object* parentBody;
-	std::vector<double> position, velocity;
+	StateVect position, velocity;
 	double semimajor, eccentricity, argOfperiapsis, longOfAscNode, inclination, meanAnomaly, hillSphereRadius;
 
 	// used for stars
@@ -33,6 +39,9 @@ void printObject(std::ofstream&, Object&);
 
 // math functions
 double distance(Object&, Object&);
+void calcOrbit(Object&);
+StateVect calcMomentumVector(StateVect&, StateVect&);
+double determinate(std::vector<double>&);
 
 int main()
 {
@@ -145,18 +154,15 @@ int main()
 		}
 	}
 
-
 	
 
 
 
-
-
-
-	// F = G (m¹m²/r²)
-
-
-	//std::cout << "\n\n" << distance(star.at(0), planet.at(2)) << "\n\n";
+	// this is where the magic happens
+	for (int i = 0; i < planet.size(); i++)
+	{
+		calcOrbit(planet.at(i));
+	}
 
 
 
@@ -238,10 +244,52 @@ double distance(Object& A, Object& B)
 {
 	// finds the distance between two objects in 3d space
 	double x, y, z;
-	x = pow(B.position.at(0) - A.position.at(0), 2);
-	y = pow(B.position.at(1) - A.position.at(1), 2);
-	z = pow(B.position.at(2) - A.position.at(2), 2);
+	x = pow(B.position.x - A.position.x, 2);
+	y = pow(B.position.y - A.position.y, 2);
+	z = pow(B.position.z - A.position.z, 2);
 	return sqrt(x + y + z);
+}
+
+void calcOrbit(Object& obj)
+{
+	StateVect momentVect, eccentVect;
+	// step 1: caculate the momentum vector h
+	momentVect = calcMomentumVector(obj.position, obj.velocity);
+
+
+	calcMomentumVector(obj.velocity, momentVect);
+
+}
+
+StateVect calcMomentumVector(StateVect& pos, StateVect& vel)
+{
+	StateVect cross;
+	std::vector<double> i, j, k;
+
+	i.push_back(pos.y);
+	i.push_back(pos.z);
+	i.push_back(vel.y);
+	i.push_back(vel.z);
+
+	j.push_back(pos.x);
+	j.push_back(pos.z);
+	j.push_back(vel.x);
+	j.push_back(vel.z);
+
+	k.push_back(pos.x);
+	k.push_back(pos.y);
+	k.push_back(vel.x);
+	k.push_back(vel.y);
+
+	cross.x = determinate(i);
+	cross.y = (determinate(j) * -1.0);
+	cross.z = determinate(k);
+	return cross;
+}
+
+double determinate(std::vector<double>& vect)
+{
+	return ((vect.at(0) * vect.at(3)) - (vect.at(1) * vect.at(2)));
 }
 
 void getData(std::ifstream& inputFile)
@@ -374,9 +422,9 @@ void getData(std::ifstream& inputFile)
 		y.erase(0, 1);
 		z = y.substr(y.find(";"));
 		z.erase(0, 1);
-		temp.position.push_back(std::stod(holder, &sz)); // x
-		temp.position.push_back(std::stod(y, &sz)); // y
-		temp.position.push_back(std::stod(z, &sz)); // z
+		temp.position.x = std::stod(holder, &sz); // x
+		temp.position.y = std::stod(y, &sz); // y
+		temp.position.z = std::stod(z, &sz); // z
 
 		// find velocity and add x y z to vector
 		while (inputFile >> holder && !(holder.find("\"Velocity\":") + 1));
@@ -385,9 +433,9 @@ void getData(std::ifstream& inputFile)
 		y.erase(0, 1);
 		z = y.substr(y.find(";"));
 		z.erase(0, 1);
-		temp.velocity.push_back(std::stod(holder, &sz)); // x
-		temp.velocity.push_back(std::stod(y, &sz)); // y
-		temp.velocity.push_back(std::stod(z, &sz)); // z
+		temp.velocity.x = std::stod(holder, &sz); // x
+		temp.velocity.y = std::stod(y, &sz); // y
+		temp.velocity.z = std::stod(z, &sz); // z
 
 		// find category / type
 		while (inputFile >> holder && !(holder.find("\"Category\":") + 1));
