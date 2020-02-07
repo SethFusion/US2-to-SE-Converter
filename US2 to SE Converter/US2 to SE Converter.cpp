@@ -12,14 +12,17 @@ struct Object
 	int temp;
 	double age, ironMass, waterMass, hydrogenMass, surfacePressure, greenhouse;
 
-	//orbit stuff
-	std::string parentBody;
+	// orbit stuff
+	Object* parentBody;
 	std::vector<double> position, velocity;
-	double semimajor, eccentricity, argOfperiapsis, longOfAscNode, inclination, meanAnomaly;
+	double semimajor, eccentricity, argOfperiapsis, longOfAscNode, inclination, meanAnomaly, hillSphereRadius;
 
-	//used for stars
+	// used for stars
 	bool isStar;
 	double luminosity;
+
+	// asteroid?
+	bool isAsteroid;
 };
 std::string::size_type sz;
 std::vector<Object> object;
@@ -65,7 +68,7 @@ int main()
 
 
 	std::vector<Object> star, planet, moon;
-	int size = object.size() - 1;
+	int size = object.size();
 	for (int i = 0; i < size; i++)
 	{
 		if (object.at(i).type == "Moon" || object.at(i).type == "DwarfMoon" || object.at(i).type == "Asteroid")
@@ -76,14 +79,14 @@ int main()
 			star.push_back(object.at(i));
 	}
 
-	for (int i = 0; i < planet.size() - 1; i++)
+	for (int i = 0; i < planet.size(); i++)
 	{
 		double F = 0.0; // force of the current star on the current planet
 		int parent = 0; // positon of the most attractive star
-		for (int j = 0; j < star.size() - 1; j++)
+		for (int j = 0; j < star.size(); j++)
 		{
 			double f = (G * pow(planet.at(i).mass, 2) * pow(star.at(j).mass, 2)) / pow(distance(planet.at(i), star.at(j)), 2);
-			// checks the current star's force with the largest known force
+			// checks the current star's attractive force with the largest known force
 			// If the current star's force is larger than any others, the parent
 			// is set to the current star
 			if (f > F)
@@ -92,13 +95,58 @@ int main()
 				parent = j;
 			}
 		}
-		planet.at(i).parentBody = star.at(parent).name;
+		planet.at(i).parentBody = &star.at(parent);
+		planet.at(i).hillSphereRadius = distance(planet.at(i), star.at(parent)) * (cbrt(planet.at(i).mass / (3 * star.at(parent).mass)));
+	}
+
+	std::cout << "\n\n\t" << distance(planet.at(0), star.at(0)) << "\t" << (cbrt(planet.at(0).mass / (3 * star.at(0).mass))) << "\n\n";
+
+	// looks for binary planet systems
+	for (int i = 0; i < planet.size(); i++)
+	{
+		for (int j = 0; j < planet.size(); j++)
+		{
+			double dist = distance(planet.at(i), planet.at(j));
+			if (dist < planet.at(i).hillSphereRadius && dist != 0)
+			{
+				planet.at(i).parentBody = &planet.at(j);
+				planet.at(j).parentBody = &planet.at(i);
+			}
+		}
+	}
+
+	// so bassically this uses the psudo-hill sphere radius of the planet to check if any moons are within that radius
+	// If they are within it, it likely means that planet is the moons parentbody
+	for (int i = 0; i < moon.size(); i++)
+	{
+		for (int j = 0; j < planet.size(); j++)
+		{
+			if (distance(moon.at(i), planet.at(j)) < planet.at(j).hillSphereRadius)
+			{
+				moon.at(i).parentBody = &planet.at(j);
+			}
+		}
+		// If the moon fails to find a parent body, it will search teh star list
+		// to for whatever star is pulling on it the most
+		if (moon.at(i).parentBody == NULL)
+		{
+			double F = 0.0;
+			int parent = 0;
+			for (int j = 0; j < star.size(); j++)
+			{
+				double f = (G * pow(moon.at(i).mass, 2) * pow(star.at(j).mass, 2)) / pow(distance(moon.at(i), star.at(j)), 2);
+				if (f > F)
+				{
+					F = f;
+					parent = j;
+				}
+			}
+			moon.at(i).parentBody = &star.at(parent);
+		}
 	}
 
 
-
-
-	// next thing to do is caluclate hill sphere of each planet, so you can use it to test for moons
+	
 
 
 
@@ -199,10 +247,13 @@ double distance(Object& A, Object& B)
 void getData(std::ifstream& inputFile)
 {
 	std::string holder;
-
+	
 	while (true)
 	{
 		Object temp;
+		temp.parentBody = NULL;
+		temp.isAsteroid = false;
+		temp.isStar = false;
 		temp.ironMass = 0;
 		temp.waterMass = 0;
 		temp.hydrogenMass = 0;
@@ -221,6 +272,7 @@ void getData(std::ifstream& inputFile)
 		while (inputFile >> holder && !(holder.find("\"SurfaceTemperature\":") + 1) && !(holder.find("\"Id\":") + 1));
 		if (holder.find("\"Id\":") + 1) // If an object does not have a temperature, it skips the next few iitems because they don't exist either
 		{
+			temp.isAsteroid = true;
 			temp.temp = 0;
 			temp.greenhouse = 0;
 			temp.surfacePressure = 0;
@@ -385,7 +437,12 @@ void getData(std::ifstream& inputFile)
 		}
 		else if (temp.type == "sso")
 		{
-			if (temp.radius > 200)
+			if (temp.isAsteroid)
+			{
+				temp.type = "Asteroid";
+				temp.class_ = "Asteroid";
+			}
+			else
 			{
 				temp.type = "DwarfPlanet";
 
@@ -395,11 +452,6 @@ void getData(std::ifstream& inputFile)
 					temp.class_ = "Ferria";
 				else
 					temp.class_ = "Terra";
-			}
-			else
-			{
-				temp.type = "Asteroid";
-				temp.class_ = "Asteroid";
 			}
 		}
 		else if (temp.type == "blackhole")
