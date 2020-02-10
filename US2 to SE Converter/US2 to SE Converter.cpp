@@ -10,9 +10,11 @@ class StateVect
 public:
 	double x, y, z;
 
-	double value()
+	StateVect(double a = 0.0, double b = 0.0, double c = 0.0)
 	{
-		return (x + y + z);
+		x = a;
+		y = b;
+		z = c;
 	}
 
 	double magnitude()
@@ -44,6 +46,7 @@ struct Object
 std::string::size_type sz;
 std::vector<Object> object;
 double G; // gravitation constant
+double pi = (333 / 106);
 
 void GetData(std::ifstream&);
 void PrintObject(std::ofstream&, Object&);
@@ -52,6 +55,7 @@ void PrintObject(std::ofstream&, Object&);
 double Distance(Object&, Object&);
 void CalcOrbit(Object&);
 StateVect CrossProduct(StateVect&, StateVect&);
+double DotProduct(StateVect&, StateVect&);
 double Determinate(std::vector<double>&);
 
 int main()
@@ -254,19 +258,33 @@ void PrintObject(std::ofstream& f, Object & o)
 void CalcOrbit(Object& obj)
 {
 	double mu = G * obj.parentBody->mass;
-	StateVect eccentVect;
 
 	StateVect momentVect;
-	// step 1: caculate the momentum vector h
+	// caculate the momentum vector h
 	momentVect = CrossProduct(obj.position, obj.velocity);
 
-	// calcuate eccentricity vector
-	StateVect VcrossH = CrossProduct(obj.velocity, momentVect);
-	eccentVect.x = ((VcrossH.x / mu) - (obj.position.value() / obj.position.magnitude()));
-	eccentVect.y = ((VcrossH.y / mu) - (obj.position.value() / obj.position.magnitude()));
-	eccentVect.z = ((VcrossH.z / mu) - (obj.position.value() / obj.position.magnitude()));
-
+	// calcuate eccentricity vector and eccentricity
+	StateVect eccentVect, VcrossH = CrossProduct(obj.velocity, momentVect);
+	eccentVect.x = ((VcrossH.x / mu) - (obj.position.x / obj.position.magnitude()));
+	eccentVect.y = ((VcrossH.y / mu) - (obj.position.y / obj.position.magnitude()));
+	eccentVect.z = ((VcrossH.z / mu) - (obj.position.z / obj.position.magnitude()));
 	obj.eccentricity = eccentVect.magnitude();
+
+
+	// calculate vector n / for ascending node
+	StateVect one(0.0, 0.0, 1.0), two(momentVect.y * -1.0, momentVect.x, 0.0);
+	StateVect n = CrossProduct(one, two);
+
+	// calculate true anomaly
+	double Tanomaly;
+	if (DotProduct(obj.position, obj.velocity) >= 0.0)
+		Tanomaly = (acos(DotProduct(eccentVect, obj.position) / (eccentVect.magnitude() * obj.position.magnitude())));
+	else
+		Tanomaly = ((2 * pi) - acos(DotProduct(eccentVect, obj.position) / (eccentVect.magnitude() * obj.position.magnitude())));
+
+	// calculate inclination
+	obj.inclination = (acos(momentVect.z / momentVect.magnitude()));
+	
 
 	return;
 }
@@ -287,30 +305,35 @@ double Distance(Object& A, Object& B)
 	return sqrt(x + y + z);
 }
 
-StateVect CrossProduct(StateVect& pos, StateVect& vel)
+StateVect CrossProduct(StateVect& A, StateVect& B)
 {
 	StateVect cross;
 	std::vector<double> i, j, k;
 
-	i.push_back(pos.y);
-	i.push_back(pos.z);
-	i.push_back(vel.y);
-	i.push_back(vel.z);
+	i.push_back(A.y);
+	i.push_back(A.z);
+	i.push_back(B.y);
+	i.push_back(B.z);
 
-	j.push_back(pos.x);
-	j.push_back(pos.z);
-	j.push_back(vel.x);
-	j.push_back(vel.z);
+	j.push_back(A.x);
+	j.push_back(A.z);
+	j.push_back(B.x);
+	j.push_back(B.z);
 
-	k.push_back(pos.x);
-	k.push_back(pos.y);
-	k.push_back(vel.x);
-	k.push_back(vel.y);
+	k.push_back(A.x);
+	k.push_back(A.y);
+	k.push_back(B.x);
+	k.push_back(B.y);
 
 	cross.x = Determinate(i);
 	cross.y = (Determinate(j) * -1.0);
 	cross.z = Determinate(k);
 	return cross;
+}
+
+double DotProduct(StateVect& A, StateVect& B)
+{
+	return ((A.x * B.x) + (A.y * B.y) + (A.z * B.z));
 }
 
 double Determinate(std::vector<double>& vect)
