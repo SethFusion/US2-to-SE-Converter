@@ -1,0 +1,2 @@
+StarBarycenter		"aEarth System"
+{}

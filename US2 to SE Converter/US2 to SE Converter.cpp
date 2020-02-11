@@ -5,7 +5,7 @@
 #include <string>
 #include <math.h>
 
-class StateVect
+class StateVect 
 {
 public:
 	double x, y, z;
@@ -32,9 +32,10 @@ struct Object
 	double age, ironMass, waterMass, hydrogenMass, surfacePressure, greenhouse;
 
 	// orbit stuff
-	Object* parentBody;
+	Object* parent;
+	std::vector<Object*> child;
 	StateVect position, velocity;
-	double semimajor, eccentricity, argOfperiapsis, longOfAscNode, inclination, meanAnomaly, hillSphereRadius;
+	double semimajor, inclination, eccentricity, argOfPeriapsis, longOfAscNode, meanAnomaly, hillSphereRadius;
 
 	// used for stars
 	bool isStar;
@@ -46,10 +47,11 @@ struct Object
 std::string::size_type sz;
 std::vector<Object> object;
 double G; // gravitation constant
-double pi = (333 / 106);
+const double PI = 3.1415926535; // it's pi you idiot
 
 void GetData(std::ifstream&);
 void PrintObject(std::ofstream&, Object&);
+void CreateBinary(std::vector<Object>&, Object&, Object&);
 
 // math functions
 double Distance(Object&, Object&);
@@ -57,6 +59,7 @@ void CalcOrbit(Object&);
 StateVect CrossProduct(StateVect&, StateVect&);
 double DotProduct(StateVect&, StateVect&);
 double Determinate(std::vector<double>&);
+StateVect Subtract(StateVect&, StateVect&);
 
 int main()
 {
@@ -91,7 +94,7 @@ int main()
 	inputFile.close();
 
 
-	std::vector<Object> star, planet, moon;
+	std::vector<Object> star, planet, moon, binary;
 	int size = object.size();
 	for (int i = 0; i < size; i++)
 	{
@@ -119,11 +122,10 @@ int main()
 				parent = j;
 			}
 		}
-		planet.at(i).parentBody = &star.at(parent);
+		planet.at(i).parent = &star.at(parent);
+		star.at(parent).child.push_back(&planet.at(i));
 		planet.at(i).hillSphereRadius = Distance(planet.at(i), star.at(parent)) * (cbrt(planet.at(i).mass / (3 * star.at(parent).mass)));
 	}
-
-	std::cout << "\n\n\t" << Distance(planet.at(0), star.at(0)) << "\t" << (cbrt(planet.at(0).mass / (3 * star.at(0).mass))) << "\n\n";
 
 	// looks for binary planet systems
 	for (int i = 0; i < planet.size(); i++)
@@ -133,8 +135,8 @@ int main()
 			double dist = Distance(planet.at(i), planet.at(j));
 			if (dist < planet.at(i).hillSphereRadius && dist != 0)
 			{
-				planet.at(i).parentBody = &planet.at(j);
-				planet.at(j).parentBody = &planet.at(i);
+				planet.at(i).parent = &planet.at(j);
+				planet.at(j).parent = &planet.at(i);
 			}
 		}
 	}
@@ -143,19 +145,21 @@ int main()
 	// If they are within it, it likely means that planet is the moons parentbody
 	for (int i = 0; i < moon.size(); i++)
 	{
+		int parent = 0;
 		for (int j = 0; j < planet.size(); j++)
 		{
 			if (Distance(moon.at(i), planet.at(j)) < planet.at(j).hillSphereRadius)
 			{
-				moon.at(i).parentBody = &planet.at(j);
+				parent = j;
+				moon.at(i).parent = &planet.at(j);
 			}
 		}
-		// If the moon fails to find a parent body, it will search teh star list
+		moon.at(i).hillSphereRadius = Distance(moon.at(i), planet.at(parent)) * (cbrt(moon.at(i).mass / (3 * planet.at(parent).mass)));
+		// If the moon fails to find a parent body, it will search the star list
 		// to for whatever star is pulling on it the most
-		if (moon.at(i).parentBody == NULL)
+		if (moon.at(i).parent == NULL)
 		{
 			double F = 0.0;
-			int parent = 0;
 			for (int j = 0; j < star.size(); j++)
 			{
 				double f = (G * pow(moon.at(i).mass, 2) * pow(star.at(j).mass, 2)) / pow(Distance(moon.at(i), star.at(j)), 2);
@@ -165,37 +169,22 @@ int main()
 					parent = j;
 				}
 			}
-			moon.at(i).parentBody = &star.at(parent);
+			moon.at(i).parent = &star.at(parent);
 		}
 	}
 
-	
-
-
-
 	// this is where the magic happens
+	for (int i = 0; i < moon.size(); i++)
+	{
+		CalcOrbit(moon.at(i));
+		if (moon.at(i).type == "Asteroid" && moon.at(i).eccentricity > 0.5)
+			moon.at(i).type = "Comet";
+	}
 	for (int i = 0; i < planet.size(); i++)
 	{
 		CalcOrbit(planet.at(i));
 	}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+	
 
 
 	std::cout << " Do you want an empty star file for your system?"
@@ -207,14 +196,22 @@ int main()
 	{
 		std::ofstream starFile(starFileName.c_str());
 
-		starFile << "StarBarycenter\t\t\"" << systemName << "\"\n{}\n";
+		starFile << "StarBarycenter\t\t\"" << systemName << " System\"\n{}\n";
 		starFile.close();
 	}
 
 	std::ofstream planetFile(planetFileName.c_str());
-	for (int i = 0; i < object.size() - 1; i++)
+	for (int i = 0; i < star.size(); i++)
 	{
-		PrintObject(planetFile, object.at(i));
+		PrintObject(planetFile, star.at(i));
+	}
+	for (int i = 0; i < planet.size(); i++)
+	{
+		PrintObject(planetFile, planet.at(i));
+	}
+	for (int i = 0; i < moon.size(); i++)
+	{
+		PrintObject(planetFile, moon.at(i));
 	}
 
 	std::cout << "\n Conversion complete! Look in the \"output\" folder\n to find your files.\n ";
@@ -231,11 +228,22 @@ void PrintObject(std::ofstream& f, Object & o)
 	{
 		f << o.type << "\t\t\t\t\t\"" << o.name << "\""
 			<< "\n{"
+			<< "\n\tParentBody\t\t\t\"" << o.parent->name << "\""
 			<< "\n\tClass\t\t\t\t\"" << o.class_ << "\""
-			<< "\n\tMass\t\t\t\t" << o.mass
+			<< "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
 			<< "\n\tRadius\t\t\t\t" << o.radius
-			<< "\n\tAge\t\t\t\t\t" << o.age
-			<< "\n\n\tAtmopshere"
+			//<< "\n\tAge\t\t\t\t\t" << o.age
+			<< "\n\n\tOrbit"
+			<< "\n\t{"
+			<< "\n\t\tRefPlane\t\t\"Ecliptic\""
+			<< "\n\t\tSemiMajorAxis\t" << o.semimajor
+			<< "\n\t\tEccentricity\t" << o.eccentricity
+			<< "\n\t\tInclination\t\t" << o.inclination
+			<< "\n\t\tAscendingNode\t" << o.longOfAscNode
+			<< "\n\t\tArgOfPericenter\t" << o.argOfPeriapsis
+			<< "\n\t\tMeanAnomaly\t\t" << o.meanAnomaly
+			<< "\n\t}"
+			<< "\n\n\tAtmosphere"
 			<< "\n\t{"
 			<< "\n\t\tPressure\t\t" << o.surfacePressure
 			<< "\n\t\tGreenhouse\t\t" << o.greenhouse
@@ -246,8 +254,9 @@ void PrintObject(std::ofstream& f, Object & o)
 
 	f << o.type << "\t\t\t\t\t\"" << o.name << "\""
 		<< "\n{"
+		<< "\n\tParentBody\t\t\t\"aEarth\""
 		<< "\n\tLum\t\t\t\t\t" << o.luminosity
-		<< "\n\tMass\t\t\t\t" << o.mass
+		<< "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
 		<< "\n\tRadius\t\t\t\t" << o.radius
 		<< "\n\tTeff\t\t\t\t" << o.temp
 		<< "\n\tAge\t\t\t\t\t" << o.age
@@ -255,13 +264,37 @@ void PrintObject(std::ofstream& f, Object & o)
 	return;
 }
 
+void CreateBinary(std::vector<Object>& binaryVect, Object& A, Object& B)
+{
+	Object temp;
+	temp.name = (A.name + "-" + B.name);
+	temp.type = "Barycenter";
+	temp.mass = A.mass + B.mass;
+	temp.parent = A.parent;
+
+	double a = Distance(A, B);
+	
+
+	temp.child.push_back(&A);
+	temp.child.push_back(&B);
+}
+
 void CalcOrbit(Object& obj)
 {
-	double mu = G * obj.parentBody->mass;
+	double mu;
+	mu = G * obj.parent->mass;
+
+	obj.position = Subtract(obj.position, obj.parent->position);
+	obj.velocity = Subtract(obj.velocity, obj.parent->velocity);
+
 
 	StateVect momentVect;
 	// caculate the momentum vector h
 	momentVect = CrossProduct(obj.position, obj.velocity);
+
+	// calculate inclination
+	obj.inclination = (acos(momentVect.z / momentVect.magnitude()));
+	obj.inclination = (obj.inclination * (180 / PI));
 
 	// calcuate eccentricity vector and eccentricity
 	StateVect eccentVect, VcrossH = CrossProduct(obj.velocity, momentVect);
@@ -280,11 +313,33 @@ void CalcOrbit(Object& obj)
 	if (DotProduct(obj.position, obj.velocity) >= 0.0)
 		Tanomaly = (acos(DotProduct(eccentVect, obj.position) / (eccentVect.magnitude() * obj.position.magnitude())));
 	else
-		Tanomaly = ((2 * pi) - acos(DotProduct(eccentVect, obj.position) / (eccentVect.magnitude() * obj.position.magnitude())));
+		Tanomaly = ((2 * PI) - acos(DotProduct(eccentVect, obj.position) / (eccentVect.magnitude() * obj.position.magnitude())));
 
-	// calculate inclination
-	obj.inclination = (acos(momentVect.z / momentVect.magnitude()));
-	
+	// calculate eccentric anomaly
+	double E = (2 * atan( (tan(Tanomaly / 2)) / (sqrt((1 + obj.eccentricity) / (1 - obj.eccentricity)) )));
+
+	// calculate long of Ascending Node
+	if (n.y >= 0.0)
+		obj.longOfAscNode = (acos(n.x / n.magnitude()));
+	else
+		obj.longOfAscNode = ( (2 * PI) - acos(n.x / n.magnitude()));
+	obj.longOfAscNode = (obj.longOfAscNode * (180 / PI));
+
+	// calculate argOfPeriapsis
+	if (eccentVect.z >= 0.0)
+		obj.argOfPeriapsis = (acos(DotProduct(n, eccentVect) / (n.magnitude() * eccentVect.magnitude())));
+	else
+		obj.argOfPeriapsis = ((2 * PI) - acos(DotProduct(n, eccentVect) / (n.magnitude() * eccentVect.magnitude())));
+	obj.argOfPeriapsis = (obj.argOfPeriapsis * (180 / PI));
+
+	// calculate mean anomaly
+	obj.meanAnomaly = (E - (obj.eccentricity * sin(E)));
+	obj.meanAnomaly = (obj.meanAnomaly * (180 / PI));
+
+	// calulate semi-major axis
+	obj.semimajor = ( 1 / ((2 / obj.position.magnitude()) - (pow(obj.velocity.magnitude(), 2) / mu)) );
+	obj.semimajor /= 1.496e11;
+	//obj.semimajor /= 1000;
 
 	return;
 }
@@ -341,6 +396,15 @@ double Determinate(std::vector<double>& vect)
 	return ((vect.at(0) * vect.at(3)) - (vect.at(1) * vect.at(2)));
 }
 
+StateVect Subtract(StateVect& A, StateVect& B)
+{
+	StateVect temp;
+	temp.x = A.x - B.x;
+	temp.y = A.y - B.y;
+	temp.z = A.z - B.z;
+	return temp;
+}
+
 void GetData(std::ifstream& inputFile)
 {
 	std::string holder;
@@ -348,7 +412,7 @@ void GetData(std::ifstream& inputFile)
 	while (true)
 	{
 		Object temp;
-		temp.parentBody = NULL;
+		temp.parent = NULL;
 		temp.isAsteroid = false;
 		temp.isStar = false;
 		temp.ironMass = 0;
@@ -367,7 +431,7 @@ void GetData(std::ifstream& inputFile)
 
 		// find temperature
 		while (inputFile >> holder && !(holder.find("\"SurfaceTemperature\":") + 1) && !(holder.find("\"Id\":") + 1));
-		if (holder.find("\"Id\":") + 1) // If an object does not have a temperature, it skips the next few iitems because they don't exist either
+		if (holder.find("\"Id\":") + 1) // If an object does not have a temperature, it skips the next few items because they don't exist either
 		{
 			temp.isAsteroid = true;
 			temp.temp = 0;
@@ -510,7 +574,7 @@ void GetData(std::ifstream& inputFile)
 			}
 			else
 			{
-				if (temp.waterMass > 0.05)
+				if (temp.waterMass / temp.mass > 0.05)
 					temp.class_ = "Aquaria";
 				else if (temp.ironMass / temp.mass > 0.3)
 					temp.class_ = "Ferria";
@@ -534,7 +598,7 @@ void GetData(std::ifstream& inputFile)
 		}
 		else if (temp.type == "sso")
 		{
-			if (temp.isAsteroid)
+			if (temp.isAsteroid || temp.radius < 300)
 			{
 				temp.type = "Asteroid";
 				temp.class_ = "Asteroid";
