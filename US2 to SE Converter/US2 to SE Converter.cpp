@@ -58,8 +58,10 @@ double Distance(Object&, Object&);
 void CalcOrbit(Object&);
 StateVect CrossProduct(StateVect&, StateVect&);
 double DotProduct(StateVect&, StateVect&);
+StateVect Scale(double, StateVect&);
 double Determinate(std::vector<double>&);
 StateVect Subtract(StateVect&, StateVect&);
+StateVect Add(StateVect&, StateVect&);
 
 int main()
 {
@@ -135,8 +137,7 @@ int main()
 			double dist = Distance(planet.at(i), planet.at(j));
 			if (dist < planet.at(i).hillSphereRadius && dist != 0)
 			{
-				planet.at(i).parent = &planet.at(j);
-				planet.at(j).parent = &planet.at(i);
+				CreateBinary(binary, planet.at(i), planet.at(j));
 			}
 		}
 	}
@@ -152,9 +153,10 @@ int main()
 			{
 				parent = j;
 				moon.at(i).parent = &planet.at(j);
+				planet.at(j).child.push_back(&moon.at(i));
 			}
 		}
-		moon.at(i).hillSphereRadius = Distance(moon.at(i), planet.at(parent)) * (cbrt(moon.at(i).mass / (3 * planet.at(parent).mass)));
+		moon.at(i).hillSphereRadius = Distance(moon.at(i), planet.at(parent)) * (cbrt(moon.at(i).mass / (3 * planet.at(parent).parent->mass)));
 		// If the moon fails to find a parent body, it will search the star list
 		// to for whatever star is pulling on it the most
 		if (moon.at(i).parent == NULL)
@@ -172,6 +174,20 @@ int main()
 			moon.at(i).parent = &star.at(parent);
 		}
 	}
+	//one day I'll revisit planet-moon binary systems
+	/*
+	// looks for binary planet-moon systems
+	for (int i = 0; i < moon.size(); i++)
+	{
+		for (int j = 0; j < planet.size(); j++)
+		{
+			double dist = Distance(moon.at(i), planet.at(j));
+			if (dist < moon.at(i).hillSphereRadius && dist != 0)
+			{
+				CreateBinary(binaryVect, moon.at(i), planet.at(j));
+			}
+		}
+	}*/
 
 	// this is where the magic happens
 	for (int i = 0; i < moon.size(); i++)
@@ -272,8 +288,24 @@ void CreateBinary(std::vector<Object>& binaryVect, Object& A, Object& B)
 	temp.mass = A.mass + B.mass;
 	temp.parent = A.parent;
 
-	double a = Distance(A, B);
+	double AposRatio = A.mass / temp.mass, 
+		BposRatio = B.mass / temp.mass;
+	StateVect AposScaled = Scale(AposRatio, A.position),
+		BposScaled = Scale(BposRatio, B.position);
+	temp.position = Add(AposScaled, BposScaled);
 	
+	double distTotal = Distance(A, B), 
+		AvelRatio = (Distance(B, temp) / distTotal), 
+		BvelRatio = (Distance(A, temp) / distTotal);
+	StateVect AvelScaled = Scale(AvelRatio, A.velocity),
+		BvelScaled = Scale(BvelRatio, B.velocity);
+	temp.velocity = Add(AvelScaled, BvelScaled);
+
+
+	A.position = Subtract(A.position, temp.position);
+	B.position = Subtract(B.position, temp.position);
+	A.velocity = Subtract(A.velocity, temp.velocity);
+	B.velocity = Subtract(B.velocity, temp.velocity);
 
 	temp.child.push_back(&A);
 	temp.child.push_back(&B);
@@ -391,6 +423,15 @@ double DotProduct(StateVect& A, StateVect& B)
 	return ((A.x * B.x) + (A.y * B.y) + (A.z * B.z));
 }
 
+StateVect Scale(double scaler, StateVect& A)
+{
+	StateVect temp;
+	temp.x = A.x * scaler;
+	temp.y = A.y * scaler;
+	temp.z = A.z * scaler;
+	return temp;
+}
+
 double Determinate(std::vector<double>& vect)
 {
 	return ((vect.at(0) * vect.at(3)) - (vect.at(1) * vect.at(2)));
@@ -402,6 +443,15 @@ StateVect Subtract(StateVect& A, StateVect& B)
 	temp.x = A.x - B.x;
 	temp.y = A.y - B.y;
 	temp.z = A.z - B.z;
+	return temp;
+}
+
+StateVect Add(StateVect& A, StateVect& B)
+{
+	StateVect temp;
+	temp.x = A.x + B.x;
+	temp.y = A.y + B.y;
+	temp.z = A.z + B.z;
 	return temp;
 }
 
