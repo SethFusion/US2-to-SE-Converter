@@ -1,2 +1,0 @@
-StarBarycenter		"Chicane Test System"
-{}

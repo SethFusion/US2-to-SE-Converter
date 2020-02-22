@@ -2,6 +2,7 @@
 #include <iostream>
 #include <fstream>
 #include <vector>
+#include <list>
 #include <string>
 #include <math.h>
 
@@ -33,7 +34,7 @@ struct Object
 
 	// orbit stuff
 	StateVect position, velocity;
-	double semimajor, inclination, eccentricity, argOfPeriapsis, longOfAscNode, meanAnomaly, hillSphereRadius;
+	double semimajor, period, inclination, eccentricity, argOfPeriapsis, longOfAscNode, meanAnomaly, hillSphereRadius;
 
 	// general
 	int temp;
@@ -55,7 +56,7 @@ const double PI = 3.1415926535; // it's pi you idiot
 
 void GetData(std::ifstream&);
 void PrintFile(std::ofstream&, Object&);
-void CreateBinary(std::vector<Object>&, Object&, Object&);
+void CreateBinary(std::list<Object>&, Object&, Object&);
 
 // math functions
 double Distance(Object&, Object&);
@@ -99,17 +100,7 @@ int main()
 	GetData(inputFile);
 	inputFile.close();
 
-
-	std::cout << "A-F:\t" << Distance(object.at(1), object.at(2)) << "\n";
-	std::cout << "A-R:\t" << Distance(object.at(1), object.at(3)) << "\n";
-	std::cout << "A-E:\t" << Distance(object.at(1), object.at(4)) << "\n";
-
-	std::cout << "F-R:\t" << Distance(object.at(2), object.at(3)) << "\n";
-	std::cout << "F-E:\t" << Distance(object.at(2), object.at(4)) << "\n";
-
-	std::cout << "R-E:\t" << Distance(object.at(3), object.at(4)) << "\n\n\n";
-
-	std::cout << "A-F Force\t" << (G * object.at(1).mass * object.at(2).mass) / pow(Distance(object.at(1), object.at(2)), 2) << "\n";
+	/*std::cout << "A-F Force\t" << (G * object.at(1).mass * object.at(2).mass) / pow(Distance(object.at(1), object.at(2)), 2) << "\n";
 	std::cout << "A-R Force\t" << (G * object.at(1).mass * object.at(3).mass) / pow(Distance(object.at(1), object.at(3)), 2) << "\n";
 	std::cout << "A-E Force\t" << (G * object.at(1).mass * object.at(4).mass) / pow(Distance(object.at(1), object.at(4)), 2) << "\n";
 
@@ -118,7 +109,6 @@ int main()
 
 	std::cout << "R-E Force\t" << (G * object.at(3).mass * object.at(4).mass) / pow(Distance(object.at(3), object.at(4)), 2) << "\n\n\n";
 
-	std::vector<Object> star, planet, moon, binary; // These vectors are only for processing types of objects
 	CreateBinary(binary, object.at(1), object.at(2));
 
 	std::cout << "AF-R Force\t" << (G * binary.at(0).mass * object.at(3).mass) / pow(Distance(binary.at(0), object.at(3)), 2) << "\n";
@@ -127,12 +117,18 @@ int main()
 
 	CreateBinary(binary, object.at(3), object.at(4));
 
-	std::cout << "AF-RE Force\t" << (G * binary.at(0).mass * binary.at(1).mass) / pow(Distance(binary.at(0), binary.at(1)), 2) << "\n";
+	std::cout << "AF-RE Force\t" << (G * binary.at(0).mass * binary.at(1).mass) / pow(Distance(binary.at(0), binary.at(1)), 2) << "\n";*/
 
 
 
 
+	std::vector<Object> star, planet, moon; // These vectors are only for processing types of objects
 	
+	std::list<Object> binary;
+	Object systemO;
+	systemO.name = systemName + " System";
+	binary.push_back(systemO);
+
 	int size = object.size();
 	for (int i = 0; i < size; i++)
 	{
@@ -144,37 +140,67 @@ int main()
 			star.push_back(object.at(i));
 	}
 
-	int b = 0; // binary object counter
+
+
+
+
+
+
+
+	std::list<Object>::iterator b = binary.begin(); // binary object counter
 	if (star.size() > 1)
 	{
 		if (star.size() > 2)
 		{
+			std::vector<Object*> hierarchyVect;
 			for (int i = 0; i < star.size(); i++)
+				hierarchyVect.push_back(&star.at(i));
+			int numOfBarys = hierarchyVect.size() - 1;
+
+			for (int binaryCounter = 0; binaryCounter < numOfBarys; binaryCounter++)
 			{
-				double F = 0.0; // force of the current star on the current star
-				int parent = 0; // positon of the most attractive star
-				for (int j = 0; j < star.size(); j++)
+				int size = hierarchyVect.size();
+				double max = 0.0; 
+				int maxi = 0, maxj = 0;
+				double forceTable[16][16];
+
+				// these two loops fill out the table used to determine binary objects
+				for (int i = 0; i < size; i++)
 				{
-					double f = (G * star.at(i).mass * star.at(j).mass) / pow(Distance(star.at(i), star.at(j)), 2);
-					// checks the current star's attractive force with the largest known force
-					// If the current star's force is larger than any others, the parent
-					// is set to the current star
-					if (f > F)
+					for (int j = 0; j < size; j++)
 					{
-						F = f;
-						parent = j;
+						if (i > j&& i < size && j < size)
+						{
+							forceTable[i][j] = (G * hierarchyVect.at(i)->mass * hierarchyVect.at(j)->mass) / pow(Distance(*hierarchyVect.at(i), *hierarchyVect.at(j)), 2);
+							if (max < forceTable[i][j])
+							{
+								max = forceTable[i][j];
+								maxi = i;
+								maxj = j;
+							}
+						}
+						else
+							forceTable[i][j] = NULL;
 					}
 				}
-				CreateBinary(binary, star.at(i), star.at(parent));
-				star.at(i).parent = star.at(parent).parent = &binary.at(b);
+				CreateBinary(binary, *hierarchyVect.at(maxi), *hierarchyVect.at(maxj));
 				b++;
+				hierarchyVect.at(maxi)->parent = hierarchyVect.at(maxj)->parent = &*b;
+				hierarchyVect.push_back(&*b);
+
+				hierarchyVect.erase(hierarchyVect.begin() + maxi);
+				hierarchyVect.erase(hierarchyVect.begin() + maxj);
 			}
+
+			root = &*b;
+			while (root->parent != NULL)
+				root = root->parent;
 		}
 		else
 		{
 			CreateBinary(binary, star.at(0), star.at(1));
-			star.at(0).parent = star.at(1).parent = root = &binary.at(b);
 			b++;
+			star.at(0).parent = star.at(1).parent = root = &*b;
 		}
 	}
 	else
@@ -212,8 +238,16 @@ int main()
 				if (dist < planet.at(i).hillSphereRadius && dist != 0)
 				{
 					CreateBinary(binary, planet.at(i), planet.at(j));
-					planet.at(i).parent = planet.at(j).parent = &binary.at(b);
 					b++;
+
+					b->parent = planet.at(i).parent;
+					for (int iterate = 0; iterate < b->parent->child.size(); iterate++)
+					{
+						if (b->parent->child.at(iterate) == &planet.at(i) || b->parent->child.at(iterate) == &planet.at(j))
+							b->parent->child.erase(b->parent->child.begin() + iterate--);
+					}
+					b->parent->child.push_back(&*b);
+					planet.at(i).parent = planet.at(j).parent = &*b;
 				}	
 			}
 		}
@@ -228,12 +262,32 @@ int main()
 		{
 			if (Distance(moon.at(i), planet.at(j)) < planet.at(j).hillSphereRadius)
 			{
-				parent = j;
-				moon.at(i).parent = &planet.at(j);
-				planet.at(j).child.push_back(&moon.at(i));
+				if (planet.at(j).parent->type == "Barycenter")
+				{
+					double forcePlanet = (G * moon.at(i).mass * planet.at(j).mass) / pow(Distance(moon.at(i), planet.at(j)), 2);
+					double forceBary = (G * moon.at(i).mass * planet.at(j).parent->mass) / pow(Distance(moon.at(i), *planet.at(j).parent), 2);
+					if (forceBary > forcePlanet)
+					{
+						parent = j;
+						moon.at(i).parent = planet.at(j).parent;
+						planet.at(j).parent->child.push_back(&moon.at(i));
+					}
+					else
+					{
+						parent = j;
+						moon.at(i).parent = &planet.at(j);
+						planet.at(j).child.push_back(&moon.at(i));
+					}
+				}
+				else
+				{
+					parent = j;
+					moon.at(i).parent = &planet.at(j);
+					planet.at(j).child.push_back(&moon.at(i));
+				}
+				j = planet.size();
 			}
 		}
-		moon.at(i).hillSphereRadius = Distance(moon.at(i), planet.at(parent)) * (cbrt(moon.at(i).mass / (3 * planet.at(parent).parent->mass)));
 		// If the moon fails to find a parent body, it will search the star list
 		// to for whatever star is pulling on it the most
 		if (moon.at(i).parent == NULL)
@@ -251,41 +305,54 @@ int main()
 			moon.at(i).parent = &star.at(parent);
 		}
 	}
-	//one day I'll revisit planet-moon binary systems
-	/*
+
 	// looks for binary planet-moon systems
 	for (int i = 0; i < moon.size(); i++)
 	{
-		for (int j = 0; j < planet.size(); j++)
+		if ((moon.at(i).mass / moon.at(i).parent->mass) > 0.01)
 		{
-			double dist = Distance(moon.at(i), planet.at(j));
-			if (dist < moon.at(i).hillSphereRadius && dist != 0)
+			CreateBinary(binary, *moon.at(i).parent, moon.at(i));
+			b++;
+
+			b->parent = moon.at(i).parent->parent;
+			for (int iterate = 0; iterate < b->parent->child.size(); iterate++)
 			{
-				CreateBinary(binaryVect, moon.at(i), planet.at(j));
+				if (b->parent->child.at(iterate) == moon.at(i).parent)
+					b->parent->child.erase(b->parent->child.begin() + iterate--);
 			}
+
+			for (int iterate = 0; iterate < moon.at(i).parent->child.size(); iterate++)
+			{
+				if (moon.at(i).parent->child.at(iterate) == &moon.at(i))
+					moon.at(i).parent->child.erase(moon.at(i).parent->child.begin() + iterate--);
+			}
+
+			b->parent->child.push_back(&*b);
+			moon.at(i).parent = moon.at(i).parent->parent = &*b;
 		}
-	}*/
+	}
 
 	// this is where the magic happens
 	CalcOrbit(*root);
 
 
-	std::cout << " Do you want an empty star file for your system?"
-		<< "\n\n"
-		<< " Type 1 for Yes or 0 for No, then press enter.\n\n ";
-	std::cin >> choice;
+//	std::cout << " Do you want an empty star file for your system?"
+	//	<< "\n\n"
+	//	<< " Type 1 for Yes or 0 for No, then press enter.\n\n ";
+//	std::cin >> choice;
+	choice == 1;
 
 	if (choice)
 	{
 		std::ofstream starFile(starFileName.c_str());
 
-		starFile << "StarBarycenter\t\t\"" << systemName << " System\"\n{}\n";
+		starFile << "StarBarycenter\t\t\"" << binary.begin()->name << "\"\n{}\n";
 		starFile.close();
 	}
 
 	std::ofstream planetFile(planetFileName.c_str());
 
-	root->class_ = systemName + " System"; // class_ is a holder for the root's psudo-parent body
+	root->parent = &*binary.begin();
 	PrintFile(planetFile, *root);
 
 	std::cout << "\n Conversion complete! Look in the \"output\" folder\n to find your files.\n ";
@@ -301,9 +368,21 @@ void PrintFile(std::ofstream& f, Object & o)
 
 	f << o.type << "\t\t\t\t\t\"" << o.name << "\""
 		<< "\n{";
-	if (&o == root)
+	if (&o == root && o.type == "Barycenter")
 	{
-		f << "\n\tParentBody\t\t\t\"" << o.class_ << "\""
+		f << "\n\tParentBody\t\t\t\"" << o.parent->name << "\""
+			<< "\n}\n\n";
+		for (int i = 0; i < o.child.size(); i++)
+			PrintFile(f, *o.child.at(i));
+		return;
+	}
+	else if (&o == root && o.type == "Star")
+	{
+		f << "\n\tParentBody\t\t\t\"" << o.parent->name << "\""
+			<< "\n\tLum\t\t\t\t\t" << o.luminosity
+			<< "\n\tTeff\t\t\t\t" << o.temp
+			<< "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
+			<< "\n\tRadius\t\t\t\t" << o.radius
 			<< "\n}\n\n";
 		for (int i = 0; i < o.child.size(); i++)
 			PrintFile(f, *o.child.at(i));
@@ -311,6 +390,7 @@ void PrintFile(std::ofstream& f, Object & o)
 	}
 	else
 		f << "\n\tParentBody\t\t\t\"" << o.parent->name << "\"";
+
 	if (o.type == "Star")
 	{
 		f << "\n\tLum\t\t\t\t\t" << o.luminosity
@@ -325,6 +405,7 @@ void PrintFile(std::ofstream& f, Object & o)
 		<< "\n\t{"
 		<< "\n\t\tRefPlane\t\t\"Ecliptic\""
 		<< "\n\t\tSemiMajorAxis\t" << o.semimajor
+		<< "\n\t\tPeriod\t\t\t" << o.period
 		<< "\n\t\tEccentricity\t" << o.eccentricity
 		<< "\n\t\tInclination\t\t" << o.inclination
 		<< "\n\t\tAscendingNode\t" << o.longOfAscNode
@@ -343,7 +424,7 @@ void PrintFile(std::ofstream& f, Object & o)
 	return;
 }
 
-void CreateBinary(std::vector<Object>& binaryVect, Object& A, Object& B)
+void CreateBinary(std::list<Object>& binaryList, Object& A, Object& B)
 {
 	Object temp;
 	temp.isAsteroid = false;
@@ -370,7 +451,7 @@ void CreateBinary(std::vector<Object>& binaryVect, Object& A, Object& B)
 	temp.child.push_back(&A);
 	temp.child.push_back(&B);
 	//temp.mass = 5.75e18;
-	binaryVect.push_back(temp);
+	binaryList.push_back(temp);
 }
 
 void CalcOrbit(Object& obj)
@@ -436,8 +517,12 @@ void CalcOrbit(Object& obj)
 
 	// calulate semi-major axis
 	obj.semimajor = ( 1 / ((2 / obj.position.magnitude()) - (pow(obj.velocity.magnitude(), 2) / mu)) );
-	obj.semimajor /= 1.496e11; // converts to AU
-	//obj.semimajor /= 1000; // converts to km
+
+	obj.period = ( (2 * PI) * (sqrt( pow(obj.semimajor, 3) / mu )) );
+	obj.period /= 3.1556952e7; // converts sec to years;
+
+	obj.semimajor /= 1.496e11; // converts m to AU
+	//obj.semimajor /= 1000; // converts m to km
 
 	return;
 }
