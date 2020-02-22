@@ -203,10 +203,24 @@ int main()
 				parent = j;
 			}
 		}
+
 		planet.at(i).parent = &star.at(parent);
-		star.at(parent).child.push_back(&planet.at(i));
+		if (planet.at(i).parent->parent != NULL && planet.at(i).parent->parent->type == "Barycenter")
+		{
+			double forceStar = (G * planet.at(i).mass * planet.at(i).parent->mass) / pow(Distance(planet.at(i), *planet.at(i).parent), 2);
+			double forceBary = (G * planet.at(i).mass * planet.at(i).parent->parent->mass) / pow(Distance(planet.at(i), *planet.at(i).parent->parent), 2);
+			if (forceBary > forceStar)
+				planet.at(i).parent = planet.at(i).parent->parent;
+
+			planet.at(i).parent->child.push_back(&planet.at(i));
+		}
+		else
+		{
+			planet.at(i).parent->child.push_back(&planet.at(i));
+		}
+
 		// hill sphere is used to check for moons
-		planet.at(i).hillSphereRadius = Distance(planet.at(i), star.at(parent)) * (cbrt(planet.at(i).mass / (3 * star.at(parent).mass)));
+		planet.at(i).hillSphereRadius = Distance(planet.at(i), *planet.at(i).parent) * (cbrt(planet.at(i).mass / (3 * planet.at(i).parent->mass)));
 	}
 
 	// looks for binary planet systems
