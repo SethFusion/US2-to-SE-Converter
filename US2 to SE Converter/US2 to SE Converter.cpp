@@ -6,6 +6,16 @@
 #include <string>
 #include <math.h>
 
+/*
+	Listen here...
+
+	Before you start judging this code for how ugly it is, just remember that I'm no physics major and
+	this shit really took it out of me. Yeah, there are probably some optimizations this garbage could 
+	use. In fact I know there are parts of this I only wrote for testing, and then left in because it
+	actually worked. I'll even say this: it is the ugliest program I've ever written. But you know what? 
+	It gets the job done, for the general case, and that's all I need it to do. 
+*/
+
 class StateVect 
 {
 public:
@@ -23,7 +33,6 @@ public:
 		return (sqrt(pow(x, 2) + pow(y, 2) + pow(z, 2)));
 	}
 };
-
 
 struct Object
 {
@@ -71,7 +80,6 @@ StateVect Add(StateVect&, StateVect&);
 int main()
 {
 	std::string systemName, starFileName, planetFileName, holder;
-	bool choice = true; // true = full system, false = closed system
 
 	std::ifstream inputFile("input/simulation.json");
 	if (!inputFile)
@@ -97,30 +105,9 @@ int main()
 	holder.erase(0, 10);
 	G = std::stod(holder, &sz);
 
+	// inputs every object into the global vector
 	GetData(inputFile);
 	inputFile.close();
-
-	/*std::cout << "A-F Force\t" << (G * object.at(1).mass * object.at(2).mass) / pow(Distance(object.at(1), object.at(2)), 2) << "\n";
-	std::cout << "A-R Force\t" << (G * object.at(1).mass * object.at(3).mass) / pow(Distance(object.at(1), object.at(3)), 2) << "\n";
-	std::cout << "A-E Force\t" << (G * object.at(1).mass * object.at(4).mass) / pow(Distance(object.at(1), object.at(4)), 2) << "\n";
-
-	std::cout << "F-R Force\t" << (G * object.at(2).mass * object.at(3).mass) / pow(Distance(object.at(2), object.at(3)), 2) << "\n";
-	std::cout << "F-E Force\t" << (G * object.at(2).mass * object.at(4).mass) / pow(Distance(object.at(2), object.at(4)), 2) << "\n";
-
-	std::cout << "R-E Force\t" << (G * object.at(3).mass * object.at(4).mass) / pow(Distance(object.at(3), object.at(4)), 2) << "\n\n\n";
-
-	CreateBinary(binary, object.at(1), object.at(2));
-
-	std::cout << "AF-R Force\t" << (G * binary.at(0).mass * object.at(3).mass) / pow(Distance(binary.at(0), object.at(3)), 2) << "\n";
-	std::cout << "AF-E Force\t" << (G * binary.at(0).mass * object.at(4).mass) / pow(Distance(binary.at(0), object.at(4)), 2) << "\n";
-	std::cout << "R-E Force\t" << (G * object.at(3).mass * object.at(4).mass) / pow(Distance(object.at(3), object.at(4)), 2) << "\n\n\n";
-
-	CreateBinary(binary, object.at(3), object.at(4));
-
-	std::cout << "AF-RE Force\t" << (G * binary.at(0).mass * binary.at(1).mass) / pow(Distance(binary.at(0), binary.at(1)), 2) << "\n";*/
-
-
-
 
 	std::vector<Object> star, planet, moon; // These vectors are only for processing types of objects
 	
@@ -128,6 +115,7 @@ int main()
 	Object systemO;
 	systemO.name = systemName + " System";
 	binary.push_back(systemO);
+	std::list<Object>::iterator b = binary.begin(); // binary object counter
 
 	int size = object.size();
 	for (int i = 0; i < size; i++)
@@ -140,14 +128,6 @@ int main()
 			star.push_back(object.at(i));
 	}
 
-
-
-
-
-
-
-
-	std::list<Object>::iterator b = binary.begin(); // binary object counter
 	if (star.size() > 1)
 	{
 		if (star.size() > 2)
@@ -206,6 +186,7 @@ int main()
 	else
 		root = &star.at(0);
 	
+	// finds the parent of all planets
 	for (int i = 0; i < planet.size(); i++)
 	{
 		double F = 0.0; // force of the current star on the current planet
@@ -224,6 +205,7 @@ int main()
 		}
 		planet.at(i).parent = &star.at(parent);
 		star.at(parent).child.push_back(&planet.at(i));
+		// hill sphere is used to check for moons
 		planet.at(i).hillSphereRadius = Distance(planet.at(i), star.at(parent)) * (cbrt(planet.at(i).mass / (3 * star.at(parent).mass)));
 	}
 
@@ -254,7 +236,7 @@ int main()
 	}
 
 	// so bassically this uses the psudo-hill sphere radius of the planet to check if any moons are within that radius
-	// If they are within it, it likely means that planet is the moons parentbody
+	// If they are within it, it likely means that planet is the moons parent
 	for (int i = 0; i < moon.size(); i++)
 	{
 		int parent = 0;
@@ -289,7 +271,7 @@ int main()
 			}
 		}
 		// If the moon fails to find a parent body, it will search the star list
-		// to for whatever star is pulling on it the most
+		// for whatever star is pulling on it the most
 		if (moon.at(i).parent == NULL)
 		{
 			double F = 0.0;
@@ -306,7 +288,7 @@ int main()
 		}
 	}
 
-	// looks for binary planet-moon systems
+	// looks for binary planet-moon systems, based on mass
 	for (int i = 0; i < moon.size(); i++)
 	{
 		if ((moon.at(i).mass / moon.at(i).parent->mass) > 0.01)
@@ -335,28 +317,15 @@ int main()
 	// this is where the magic happens
 	CalcOrbit(*root);
 
-
-//	std::cout << " Do you want an empty star file for your system?"
-	//	<< "\n\n"
-	//	<< " Type 1 for Yes or 0 for No, then press enter.\n\n ";
-//	std::cin >> choice;
-	choice == 1;
-
-	if (choice)
-	{
-		std::ofstream starFile(starFileName.c_str());
-
-		starFile << "StarBarycenter\t\t\"" << binary.begin()->name << "\"\n{}\n";
-		starFile.close();
-	}
-
-	std::ofstream planetFile(planetFileName.c_str());
+	std::ofstream starFile(starFileName.c_str());
+	starFile << "StarBarycenter\t\t\"" << binary.begin()->name << "\"\n{}\n";
+	starFile.close();
 
 	root->parent = &*binary.begin();
+	std::ofstream planetFile(planetFileName.c_str());
 	PrintFile(planetFile, *root);
 
 	std::cout << "\n Conversion complete! Look in the \"output\" folder\n to find your files.\n ";
-	std::cin >> choice;
 
 	planetFile.close();
 	return 0;
@@ -403,7 +372,7 @@ void PrintFile(std::ofstream& f, Object & o)
 		<< "\n\tRadius\t\t\t\t" << o.radius
 		<< "\n\n\tOrbit"
 		<< "\n\t{"
-		<< "\n\t\tRefPlane\t\t\"Ecliptic\""
+		<< "\n\t\tRefPlane\t\t\"Equator\""
 		<< "\n\t\tSemiMajorAxis\t" << o.semimajor
 		<< "\n\t\tPeriod\t\t\t" << o.period
 		<< "\n\t\tEccentricity\t" << o.eccentricity
@@ -475,6 +444,7 @@ void CalcOrbit(Object& obj)
 	// calculate inclination
 	obj.inclination = (acos(momentVect.z / momentVect.magnitude()));
 	obj.inclination = (obj.inclination * (180 / PI));
+	obj.inclination -= 90; // convert to equator
 
 	// calcuate eccentricity vector and eccentricity
 	StateVect eccentVect, VcrossH = CrossProduct(obj.velocity, momentVect);
@@ -503,6 +473,7 @@ void CalcOrbit(Object& obj)
 	else
 		obj.longOfAscNode = ( (2 * PI) - acos(n.x / n.magnitude()));
 	obj.longOfAscNode = (obj.longOfAscNode * (180 / PI));
+	obj.longOfAscNode -= 90; // convert to equator
 
 	// calculate argOfPeriapsis
 	if (eccentVect.z >= 0.0)
@@ -510,10 +481,12 @@ void CalcOrbit(Object& obj)
 	else
 		obj.argOfPeriapsis = ((2 * PI) - acos(DotProduct(n, eccentVect) / (n.magnitude() * eccentVect.magnitude())));
 	obj.argOfPeriapsis = (obj.argOfPeriapsis * (180 / PI));
+	obj.argOfPeriapsis -= 90; // convert to equator
 
 	// calculate mean anomaly
 	obj.meanAnomaly = (E - (obj.eccentricity * sin(E)));
 	obj.meanAnomaly = (obj.meanAnomaly * (180 / PI));
+	obj.meanAnomaly -= 90; // convert to equator
 
 	// calulate semi-major axis
 	obj.semimajor = ( 1 / ((2 / obj.position.magnitude()) - (pow(obj.velocity.magnitude(), 2) / mu)) );

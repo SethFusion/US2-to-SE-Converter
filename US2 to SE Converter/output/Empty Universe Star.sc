@@ -1,2 +1,0 @@
-StarBarycenter		"Empty Universe System"
-{}
