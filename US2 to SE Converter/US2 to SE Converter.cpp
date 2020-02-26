@@ -44,6 +44,7 @@ struct Object
 	// orbit stuff
 	StateVect position, velocity;
 	double semimajor, period, inclination, eccentricity, argOfPeriapsis, longOfAscNode, meanAnomaly, hillSphereRadius;
+	double rotationPeriod, obliquity; // obliquity is unused for now.
 
 	// general
 	int temp;
@@ -366,6 +367,7 @@ void PrintFile(std::ofstream& f, Object & o)
 			<< "\n\tTeff\t\t\t\t" << o.temp
 			<< "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
 			<< "\n\tRadius\t\t\t\t" << o.radius
+			<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod
 			<< "\n}\n\n";
 		for (int i = 0; i < o.child.size(); i++)
 			PrintFile(f, *o.child.at(i));
@@ -384,6 +386,7 @@ void PrintFile(std::ofstream& f, Object & o)
 
 		f << "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
 		<< "\n\tRadius\t\t\t\t" << o.radius
+		<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod
 		<< "\n\n\tOrbit"
 		<< "\n\t{"
 		<< "\n\t\tRefPlane\t\t\"Equator\""
@@ -713,6 +716,13 @@ void GetData(std::ifstream& inputFile)
 		holder.erase(0, 9);
 		temp.radius = std::stod(holder, &sz);
 		temp.radius /= 1000; // m to km
+
+		// finds angular velocity
+		while (inputFile >> holder && !(holder.find("\"AngularVelocity\":") + 1));
+		holder.erase(0, 21);
+		temp.rotationPeriod = std::stod(holder, &sz); // gets angular velocity
+		temp.rotationPeriod = ((2 * PI) / abs(temp.rotationPeriod)); // calculates rot period
+		temp.rotationPeriod /= 3600; // sec to hours
 
 		std::string y, z;
 		// find position and add x y z to vector
