@@ -498,7 +498,24 @@ void CalcOrbit(Object& obj)
 		obj.argOfPeriapsis = (acos(DotProduct(n, eccentVect) / (n.magnitude() * eccentVect.magnitude())));
 	else
 		obj.argOfPeriapsis = ((2 * PI) - acos(DotProduct(n, eccentVect) / (n.magnitude() * eccentVect.magnitude())));
-	obj.argOfPeriapsis = (obj.argOfPeriapsis * (180 / PI));
+
+	// Calculates Obliquity
+	StateVect left, forward, parentTemp;
+	parentTemp.x = (obj.argOfPeriapsis - obj.parent->position.x);
+	parentTemp.y = (obj.argOfPeriapsis - obj.parent->position.y);
+	parentTemp.z = (obj.argOfPeriapsis - obj.parent->position.z);
+	left = Normalize(parentTemp);
+	forward = CrossProduct(left, momentVect);
+	
+	StateVect rotationAxis, world;
+	rotationAxis = Normalize(obj.angularVelocity);
+	// world = 
+	obj.obliquity = (PI - acos(DotProduct(momentVect, world)));
+	// orgument of obliquity 
+
+
+
+	obj.argOfPeriapsis = (obj.argOfPeriapsis * (180 / PI)); // convert to degree
 	obj.argOfPeriapsis -= 90; // convert to equator
 
 	// calculate mean anomaly
