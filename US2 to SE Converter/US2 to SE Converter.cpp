@@ -42,9 +42,9 @@ struct Object
 	double mass, radius;
 
 	// orbit stuff
-	StateVect position, velocity;
+	StateVect position, velocity, angularVelocity, orientation;
 	double semimajor, period, inclination, eccentricity, argOfPeriapsis, longOfAscNode, meanAnomaly, hillSphereRadius;
-	double rotationPeriod, obliquity; // obliquity is unused for now.
+	double rotationPeriod, obliquity;
 
 	// general
 	int temp;
@@ -77,6 +77,7 @@ StateVect Scale(double, StateVect&);
 double Determinate(std::vector<double>&);
 StateVect Subtract(StateVect&, StateVect&);
 StateVect Add(StateVect&, StateVect&);
+StateVect Normalize(StateVect&);
 
 int main()
 {
@@ -227,7 +228,7 @@ int main()
 	// looks for binary planet systems
 	for (int i = 0; i < planet.size(); i++)
 	{
-		if (planet.at(i).parent->type != "Barycenter")
+		if (planet.at(i).parent->type != "Barycenter") // Find another way to stop planets from going through twice!
 		{
 			for (int j = 0; j < planet.size(); j++)
 			{
@@ -596,6 +597,16 @@ StateVect Add(StateVect& A, StateVect& B)
 	return temp;
 }
 
+StateVect Normalize(StateVect& a)
+{
+	double mag = a.magnitude();
+	StateVect temp;
+	temp.x = a.x / mag;
+	temp.y = a.y / mag;
+	temp.z = a.z / mag;
+	return temp;
+}
+
 
 
 
@@ -717,14 +728,30 @@ void GetData(std::ifstream& inputFile)
 		temp.radius = std::stod(holder, &sz);
 		temp.radius /= 1000; // m to km
 
+		std::string y, z;
+		/*
+		// find orientation and add x y z to vector
+		while (inputFile >> holder && !(holder.find("\"Orientation\":") + 1));
+		holder.erase(0, 15);
+		y = holder.substr(holder.find(";"));
+		y.erase(0, 1);
+		z = y.substr(y.find(";"));
+		z.erase(0, 1);
+		temp.orientation.x = std::stod(holder, &sz); // x
+		temp.orientation.y = std::stod(y, &sz); // y
+		temp.orientation.z = std::stod(z, &sz); // z
+		// still one value left
+		*/
+
 		// finds angular velocity
+		temp.angularVelocity.x = 0.0;
+		temp.angularVelocity.z = 0.0;
 		while (inputFile >> holder && !(holder.find("\"AngularVelocity\":") + 1));
 		holder.erase(0, 21);
-		temp.rotationPeriod = std::stod(holder, &sz); // gets angular velocity
+		temp.rotationPeriod = temp.angularVelocity.y = std::stod(holder, &sz); // gets angular velocity
 		temp.rotationPeriod = ((2 * PI) / abs(temp.rotationPeriod)); // calculates rot period
 		temp.rotationPeriod /= 3600; // sec to hours
 
-		std::string y, z;
 		// find position and add x y z to vector
 		while (inputFile >> holder && !(holder.find("\"Position\":") + 1));
 		holder.erase(0, 12);
