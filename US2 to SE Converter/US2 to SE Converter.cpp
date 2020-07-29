@@ -1,9 +1,3 @@
-/*
-
-Doesn't run yet, but some local fixes with the original converter did work
-
-*/
-
 #include <string>
 #include <iostream>
 #include <fstream>
@@ -122,7 +116,7 @@ int main()
 	GetData(inputFile);
 	inputFile.close();
 
-    Object *attractor, *neighbor;
+    Object *attractor = NULL, *neighbor = NULL;
     double force, dist, max_f, min_d;
 
 	std::list<Object> binary;
@@ -140,7 +134,6 @@ int main()
 std::cout << "  " << object.at(i).name << "\n";
     }
 
-	root = object.at(0).parent;
     for (int i = 0; i < size-2; i++)
     {
         max_f = 0.0;
@@ -196,6 +189,11 @@ std::cout << "4" << "\n";
                 Bond(binary, b, &object.at(i), neighbor);
         }
     }
+
+	// as long as all objects are connected up the hierarchy, this will find the root
+	root = &object.at(0);
+	while (root->parent != NULL)
+		root = root->parent;
 
     for (int i = 0; i < size; i++)
     {
@@ -327,7 +325,7 @@ void PrintFile(std::ofstream& f, Object & o)
 			<< "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
 			<< "\n\tRadius\t\t\t\t" << o.radius
 			<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod
-            << "\n\tObliquity:\t\t" << o.obliquity
+            //<< "\n\tObliquity:\t\t" << o.obliquity
 			<< "\n}\n\n";
 		for (int i = 0; i < o.child.size(); i++)
 			PrintFile(f, *o.child.at(i));
@@ -336,19 +334,14 @@ void PrintFile(std::ofstream& f, Object & o)
 	else
 		f << "\n\tParentBody\t\t\t\"" << o.parent->name << "\"";
 
-	if (o.type == "Star")
-	{
-		f << "\n\tLum\t\t\t\t\t" << o.luminosity
-			<< "\n\tTeff\t\t\t\t" << o.temp;
-	}
-	else
-		f << "\n\tClass\t\t\t\t\"" << o.class_ << "\"";
-
-		f << "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
+	if (o.type != "Barycenter")
+		f << "\n\tClass\t\t\t\t\"" << o.class_ << "\""
+		<< "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
 		<< "\n\tRadius\t\t\t\t" << o.radius
-		<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod
-        << "\n\tObliquity:\t\t" << o.obliquity
-		<< "\n\n\tOrbit"
+		<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod;
+
+	//f << "\n\tObliquity:\t\t" << o.obliquity
+	f << "\n\n\tOrbit"
 		<< "\n\t{"
 		<< "\n\t\tRefPlane\t\t\"Equator\""
 		<< "\n\t\tSemiMajorAxis\t" << o.semimajor
@@ -358,13 +351,16 @@ void PrintFile(std::ofstream& f, Object & o)
 		<< "\n\t\tAscendingNode\t" << o.longOfAscNode
 		<< "\n\t\tArgOfPericenter\t" << o.argOfPeriapsis
 		<< "\n\t\tMeanAnomaly\t\t" << o.meanAnomaly
-		<< "\n\t}"
-		<< "\n\n\tAtmosphere"
+		<< "\n\t}";
+
+	if (o.type != "Barycenter")
+		f << "\n\n\tAtmosphere"
 		<< "\n\t{"
 		<< "\n\t\tPressure\t\t" << o.surfacePressure
 		<< "\n\t\tGreenhouse\t\t" << o.greenhouse
-		<< "\n\t}"
-		<< "\n}\n\n";
+		<< "\n\t}";
+
+	f << "\n}\n\n";
 
 	for (int i = 0; i < o.child.size(); i++)
 		PrintFile(f, *o.child.at(i));
@@ -821,3 +817,4 @@ void GetData(std::ifstream& inputFile)
 		object.push_back(temp);
 	}
 }
+
