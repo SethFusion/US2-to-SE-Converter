@@ -1,3 +1,15 @@
+/*
+
+Since last version:
+
+Moon-like moons fixed
+Fragments aren't lost if named
+Nameless fragments are ignored if unnamed (but still converted)
+Mass cuttoff for frags
+Recursive barycenters fixed
+
+*/
+
 #include <string>
 #include <iostream>
 #include <fstream>
@@ -127,22 +139,27 @@ int main()
 
 	int size = object.size();
 
-	std::sort(object.begin(), object.end(), [](Object const& one, Object const& two){ return ( one.mass > two.mass ); } ); // supposed to be pretty quick in c++?
-
+	// sort by descending mass and trim mass at arbitrary cutoff
+	// (could be better to trim over having a valid name? all the fragments get past this cutoff)
+	std::sort(object.begin(), object.end(), [](Object const& one, Object const& two){ return ( one.mass > two.mass ); } );
     for (int i = 0; i < size; i++)
     {
-std::cout << "  " << object.at(i).name << "\n";
+        if (object.at(i).mass <= 1000)
+        {
+            size = i;
+            break;
+        }
     }
 
     for (int i = 0; i < size-2; i++)
     {
         max_f = 0.0;
         min_d = std::numeric_limits<double>::max();
-        for (int j = 0; j < size-2; j++)
+        for (int j = 0; j < size; j++)
         {
             if (i==j) continue;
             // identify strongest attractor
-            force = (object.at(i).mass * object.at(j).mass) / pow(Distance(object.at(i), object.at(j)), 2);
+            force = object.at(j).mass / pow(Distance(object.at(i), object.at(j)), 2); // G, m constants
             if (max_f < force && (i==0 || object.at(i).mass < object.at(j).mass))
             {
                 max_f = force;
@@ -157,18 +174,18 @@ std::cout << "  " << object.at(i).name << "\n";
             }
         }
         if (attractor == neighbor){ // else { guaranteed: attractor > neighbor }
-std::cout << "1" << "\n";
+
             object.at(i).mass > attractor->mass ? Bond(binary, b, &object.at(i), attractor) : Bond(binary, b, attractor, &object.at(i));
         }
         else if (object.at(i).mass > neighbor->mass && object.at(i).mass > attractor->mass)
         {
-std::cout << "2" << "\n";
+
             Bond(binary, b, &object.at(i), attractor);
             Distance(*neighbor, object.at(i)) < Distance(*neighbor, *attractor) ? Bond(binary, b, &object.at(i), neighbor) : Bond(binary, b, attractor, neighbor);
         }
         else if (object.at(i).mass < neighbor->mass && object.at(i).mass < attractor->mass)
         {
-std::cout << "3" << "\n";
+
             Bond(binary, b, attractor, neighbor);
 
             neighbor->hillSphereRadius = Distance(*neighbor, *attractor) * (cbrt(neighbor->mass / (3 * attractor->mass)));
@@ -180,7 +197,7 @@ std::cout << "3" << "\n";
         }
         else // neighbor < obj < attractor
         {
-std::cout << "4" << "\n";
+
             Bond(binary, b, attractor, &object.at(i));
 
             object.at(i).hillSphereRadius = Distance(object.at(i), *attractor) * (cbrt(object.at(i).mass / (3 * attractor->mass)));
@@ -195,19 +212,19 @@ std::cout << "4" << "\n";
 	while (root->parent != NULL)
 		root = root->parent;
 
+	// not sure if needed anymore
     for (int i = 0; i < size; i++)
     {
         if (object.at(i).parent == NULL)
         {
             object.at(i).parent = root;
-std::cout << "5.   " << object.at(i).name << "\n";
         }
         if (object.at(i).partner == NULL)
-{
+        {
             object.at(i).partner = root;
-std::cout << "6.   " << object.at(i).name << "\n";}
+        }
     }
-std::cout << "7: end.\n";
+
 
     // this is where the magic happens
 	CalcOrbit(*root);
@@ -230,6 +247,7 @@ std::cout << "7: end.\n";
 
 void Bond(std::list<Object>& binary, std::list<Object>::iterator& b, Object* dom, Object* sub)
 {
+
     if (sub->parent == dom || dom == sub->partner)
         return;
 
@@ -239,7 +257,24 @@ void Bond(std::list<Object>& binary, std::list<Object>::iterator& b, Object* dom
         double forceObj = (sub->mass * dom->mass) / pow(Distance(*sub, *dom), 2);
         double forceBary = (sub->mass * dom->parent->mass) / pow(Distance(*sub, *dom->parent), 2);
         if (forceBary > forceObj)
+        {
             dom = dom->parent;
+            Bond(binary, b, dom, sub);
+            return;
+        }
+    }
+
+    // same as above for when Sub already has a Bary with something else than Dom
+    if ((sub->parent != NULL && sub->parent->type == "Barycenter") && sub->parent != sub->partner)
+    {
+        double forceObj = (dom->mass * sub->mass) / pow(Distance(*dom, *sub), 2);
+        double forceBary = (dom->mass * sub->parent->mass) / pow(Distance(*dom, *sub->parent), 2);
+        if (forceBary > forceObj)
+        {
+            sub = sub->parent;
+            Bond(binary, b, dom, sub);
+            return;
+        }
     }
 
     // whether bonding is direct or requires a barycenter
@@ -261,13 +296,11 @@ void Bond(std::list<Object>& binary, std::list<Object>::iterator& b, Object* dom
             b->parent->child.push_back(&*b);
         }
         dom->parent = sub->parent = &*b;
-std::cout << "b.   " << dom->name << "+" << sub->name << "    partners:   " << dom->partner->name << sub->partner->name << "\n";
     }
     else
     {
         sub->partner = sub->parent = dom;
         sub->parent->child.push_back(sub);
-std::cout << "c.   " << dom->name << "+" << sub->name << "\n";
     }
 }
 
@@ -278,11 +311,11 @@ void CreateBinary(std::list<Object>& binaryList, Object& A, Object& B, Object* C
 	temp.isStar = false;
 	temp.name = (A.name + "-" + B.name);
 	temp.type = "Barycenter";
-std::cout << "B.   " << temp.name << "\n";
 	temp.mass = A.mass + B.mass;
 	temp.parent = A.parent;
     if (C != NULL && A.parent != NULL)
         temp.partner = temp.parent->type == "Barycenter" ? C : temp.parent;
+
 	// This essentially finds the average of the weighted vectors to determine the position of the barycenter
 	double AposRatio = A.mass / temp.mass,
 		BposRatio = B.mass / temp.mass;
@@ -369,6 +402,7 @@ void PrintFile(std::ofstream& f, Object & o)
 
 void CalcOrbit(Object& obj)
 {
+
 	for (int i = 0; i < obj.child.size(); i++)
 		CalcOrbit(*obj.child.at(i));
 
@@ -461,6 +495,7 @@ void CalcOrbit(Object& obj)
 
 void CalcMoreOrbit(Object& obj)
 {
+
 	for (int i = 0; i < obj.child.size(); i++)
 		CalcMoreOrbit(*obj.child.at(i));
 
@@ -748,6 +783,15 @@ void GetData(std::ifstream& inputFile)
 		holder.erase(holder.size() - 1, 1);
 		temp.type = holder;
 
+        // objects built by collisions have empty Category
+        if (temp.type == "" && temp.name != "")
+        {
+            if (temp.mass > 150000*pow(1000000, 4)) // low-ish mass limit for Brown Dwarfs
+                temp.type = "star";
+            else
+                temp.type = "planet";
+        }
+
 		// uses category to determine what kind of object this is
 		if (temp.isStar == true || temp.type == "star")
 		{
@@ -817,4 +861,3 @@ void GetData(std::ifstream& inputFile)
 		object.push_back(temp);
 	}
 }
-
