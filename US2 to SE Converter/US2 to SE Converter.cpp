@@ -1,12 +1,23 @@
 /*
 
-Since last version:
+Fixed since last version:
 
-Moon-like moons fixed
-Fragments aren't lost if named
-Nameless fragments are ignored if unnamed (but still converted)
-Mass cuttoff for frags
-Recursive barycenters fixed
+Changed the way type is identified, reasons:
+1. half of the objects were the wrong type because SU2 doesn't update types of objects you modify
+2. type now follows hierarchy and astronomical definitions, such as clearing orbits
+3. dwarf planets are identified correctly, dwarf moons based on mass cutoff
+4. will be easy to add support for planemo and moonmoon types if those are added to SE
+Separated class identification to its own function for brevity
+Removed some old unneeded code
+Nameless fragments are now skipped by input function
+Recursive barycenters fixed (again...)
+
+Remaining Bugs:
+
+Obliquity is still 100% broken
+Some binary math still seems wrong
+Trojans result in bad math (first time I tested a system with large trojans)
+Class identification could be better... classes in output files are often more accurate if (now separate) "classifier" function is disabled
 
 */
 
@@ -19,6 +30,12 @@ Recursive barycenters fixed
 
 #include <algorithm> // for sort()
 #include <limits> // for max double
+
+#define STARCUTOFF 30000*pow(1000000, 4) // 2.5*10e28 ~ 13 Jupiter masses is the Brown Dwarf cutoff used by SE
+#define HYDRCUTOFF 2000*pow(10000, 4) // mass < Mimas of ~2*10e19 is used as cutoff
+#define K_KGKGAU 75.345 * pow(10000000000000, 4)
+// In solar-mass, earth-mass & AU units, the PI discriminant constant K = 807.
+// But we use kg, kg, AU instead, so our constant = K*pow(solar-mass, 5.0/2.0)/earth-mass = 7.53445e53
 
 /*
 	Listen here...
@@ -69,8 +86,8 @@ struct Object
 	bool isStar;
 	double luminosity;
 
-	// asteroid?
-	bool isAsteroid;
+	// in hydrostatic equilibrium?
+	bool isRound;
 };
 std::string::size_type sz;
 std::vector<Object> object;
@@ -83,11 +100,14 @@ void GetData(std::ifstream&);
 void PrintFile(std::ofstream&, Object&);
 void Bond(std::list<Object>&, std::list<Object>::iterator&, Object*, Object*);
 void CreateBinary(std::list<Object>&, Object&, Object&, Object*);
+void Typifier(Object&);
+void Classifier(Object&);
 
 // math functions
 double Distance(Object&, Object&);
 void CalcOrbit(Object&);
-void CalcMoreOrbit(Object& obj);
+void CalcMoreOrbit(Object&);
+bool ClearanceCheck(Object&);
 StateVect CrossProduct(StateVect&, StateVect&);
 double DotProduct(StateVect&, StateVect&);
 StateVect Scale(double, StateVect&);
@@ -138,20 +158,10 @@ int main()
 	std::list<Object>::iterator b = binary.begin(); // binary object counter
 
 	int size = object.size();
-
-	// sort by descending mass and trim mass at arbitrary cutoff
-	// (could be better to trim over having a valid name? all the fragments get past this cutoff)
+	// sort by descending mass
 	std::sort(object.begin(), object.end(), [](Object const& one, Object const& two){ return ( one.mass > two.mass ); } );
-    for (int i = 0; i < size; i++)
-    {
-        if (object.at(i).mass <= 1000)
-        {
-            size = i;
-            break;
-        }
-    }
 
-    for (int i = 0; i < size-2; i++)
+    for (int i = 0; i < size; i++)
     {
         max_f = 0.0;
         min_d = std::numeric_limits<double>::max();
@@ -179,13 +189,11 @@ int main()
         }
         else if (object.at(i).mass > neighbor->mass && object.at(i).mass > attractor->mass)
         {
-
             Bond(binary, b, &object.at(i), attractor);
             Distance(*neighbor, object.at(i)) < Distance(*neighbor, *attractor) ? Bond(binary, b, &object.at(i), neighbor) : Bond(binary, b, attractor, neighbor);
         }
         else if (object.at(i).mass < neighbor->mass && object.at(i).mass < attractor->mass)
         {
-
             Bond(binary, b, attractor, neighbor);
 
             neighbor->hillSphereRadius = Distance(*neighbor, *attractor) * (cbrt(neighbor->mass / (3 * attractor->mass)));
@@ -197,7 +205,6 @@ int main()
         }
         else // neighbor < obj < attractor
         {
-
             Bond(binary, b, attractor, &object.at(i));
 
             object.at(i).hillSphereRadius = Distance(object.at(i), *attractor) * (cbrt(object.at(i).mass / (3 * attractor->mass)));
@@ -211,25 +218,18 @@ int main()
 	root = &object.at(0);
 	while (root->parent != NULL)
 		root = root->parent;
-
-	// not sure if needed anymore
-    for (int i = 0; i < size; i++)
-    {
-        if (object.at(i).parent == NULL)
-        {
-            object.at(i).parent = root;
-        }
-        if (object.at(i).partner == NULL)
-        {
-            object.at(i).partner = root;
-        }
-    }
-
+    root->partner = root->parent = root;
 
     // this is where the magic happens
 	CalcOrbit(*root);
 	// requires partners (binaries) to already have some orbit info
 	CalcMoreOrbit(*root);
+
+    for (int i = 0; i < size; i++)
+    {
+        Typifier(object.at(i));
+        Classifier(object.at(i));
+    }
 
 	std::ofstream starFile(starFileName.c_str());
 	starFile << "StarBarycenter\t\t\"" << binary.begin()->name << "\"\n{}\n";
@@ -258,9 +258,12 @@ void Bond(std::list<Object>& binary, std::list<Object>::iterator& b, Object* dom
         double forceBary = (sub->mass * dom->parent->mass) / pow(Distance(*sub, *dom->parent), 2);
         if (forceBary > forceObj)
         {
-            dom = dom->parent;
-            Bond(binary, b, dom, sub);
-            return;
+            if (Distance(*sub, *dom->parent) > Distance(*dom->partner, *dom->parent))
+            {
+                dom = dom->parent;
+                Bond(binary, b, dom, sub);
+                return;
+            }
         }
     }
 
@@ -278,7 +281,7 @@ void Bond(std::list<Object>& binary, std::list<Object>::iterator& b, Object* dom
     }
 
     // whether bonding is direct or requires a barycenter
-    if ((dom->type == "Star" && sub->type == "Star") || (sub->mass / dom->mass) > 0.01)
+    if (dom->type == "Star" && sub->type == "Star" || (sub->mass / dom->mass) > 0.01)
     {
         CreateBinary(binary, *dom, *sub, dom->partner);
         dom->partner = sub;
@@ -307,15 +310,13 @@ void Bond(std::list<Object>& binary, std::list<Object>::iterator& b, Object* dom
 void CreateBinary(std::list<Object>& binaryList, Object& A, Object& B, Object* C)
 {
 	Object temp;
-	temp.isAsteroid = false;
-	temp.isStar = false;
+    temp.isStar = A.isStar && B.isStar; // a barycenter is "stellar" if one of its components is a star
 	temp.name = (A.name + "-" + B.name);
 	temp.type = "Barycenter";
 	temp.mass = A.mass + B.mass;
 	temp.parent = A.parent;
     if (C != NULL && A.parent != NULL)
         temp.partner = temp.parent->type == "Barycenter" ? C : temp.parent;
-
 	// This essentially finds the average of the weighted vectors to determine the position of the barycenter
 	double AposRatio = A.mass / temp.mass,
 		BposRatio = B.mass / temp.mass;
@@ -368,7 +369,8 @@ void PrintFile(std::ofstream& f, Object & o)
 		f << "\n\tParentBody\t\t\t\"" << o.parent->name << "\"";
 
 	if (o.type != "Barycenter")
-		f << "\n\tClass\t\t\t\t\"" << o.class_ << "\""
+		f
+		<< "\n\tClass\t\t\t\t\"" << o.class_ << "\""
 		<< "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
 		<< "\n\tRadius\t\t\t\t" << o.radius
 		<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod;
@@ -520,8 +522,6 @@ void CalcMoreOrbit(Object& obj)
 	return;
 }
 
-
-
 double Distance(Object& A, Object& B)
 {
 	// finds the distance between two objects in 3d space
@@ -605,11 +605,6 @@ StateVect Normalize(StateVect& a)
 	return temp;
 }
 
-
-
-
-
-
 void GetData(std::ifstream& inputFile)
 {
 	std::string holder;
@@ -618,7 +613,6 @@ void GetData(std::ifstream& inputFile)
 	{
 		Object temp;
 		temp.parent = NULL;
-		temp.isAsteroid = false;
 		temp.isStar = false;
 		temp.ironMass = 0;
 		temp.waterMass = 0;
@@ -638,7 +632,6 @@ void GetData(std::ifstream& inputFile)
 		while (inputFile >> holder && !(holder.find("\"SurfaceTemperature\":") + 1) && !(holder.find("\"Id\":") + 1));
 		if (holder.find("\"Id\":") + 1) // If an object does not have a temperature, it skips the next few items because they don't exist either
 		{
-			temp.isAsteroid = true;
 			temp.temp = 0;
 			temp.greenhouse = 0;
 			temp.surfacePressure = 0;
@@ -665,11 +658,6 @@ void GetData(std::ifstream& inputFile)
 		holder.erase(0, 13);
 		temp.luminosity = std::stod(holder, &sz);
 		temp.luminosity = (temp.luminosity / (3.827 * pow(10, 26))); // converts watts to solar lum
-
-		// determine if it is a star
-		while (inputFile >> holder && !(holder.find("\"StarType\":") + 1));
-		holder.erase(0, 11);
-		temp.isStar = std::stoi(holder, &sz);
 
 		// find molten level
 		while (inputFile >> holder && !(holder.find("\"MoltenLevel\":") + 1));
@@ -714,11 +702,23 @@ void GetData(std::ifstream& inputFile)
 		}
 	NoTemperature:;
 
-		// find mass
+		// find mass, isStar, type, shape
 		while (inputFile >> holder && !(holder.find("\"Mass\":") + 1));
 		holder.erase(0, 7);
 		temp.mass = std::stod(holder, &sz);
 		//temp.mass = (temp.mass / (5.9736 * pow(10, 24))); // converts kg to earth masses
+        if (temp.mass > STARCUTOFF)
+        {
+            temp.isStar = true;
+            temp.type = "Star";
+        }
+        else
+        {
+            temp.isStar = false;
+            temp.type = ""; // will be dealt with after hierarchy is found
+        }
+        temp.isRound = temp.mass > HYDRCUTOFF;
+        // in reality hydrostatic equilibrium is determined by shape, but SU2 doesn't seem to store this information
 
 		// find radius
 		while (inputFile >> holder && !(holder.find("\"Radius\":") + 1));
@@ -777,87 +777,103 @@ void GetData(std::ifstream& inputFile)
 		temp.velocity.y = std::stod(y, &sz); // y
 		temp.velocity.z = std::stod(z, &sz); // z
 
-		// find category / type
+		// find category
 		while (inputFile >> holder && !(holder.find("\"Category\":") + 1));
 		holder.erase(0, 12);
 		holder.erase(holder.size() - 1, 1);
-		temp.type = holder;
+		temp.class_ = holder;
 
-        // objects built by collisions have empty Category
-        if (temp.type == "" && temp.name != "")
-        {
-            if (temp.mass > 150000*pow(1000000, 4)) // low-ish mass limit for Brown Dwarfs
-                temp.type = "star";
-            else
-                temp.type = "planet";
-        }
-
-		// uses category to determine what kind of object this is
-		if (temp.isStar == true || temp.type == "star")
-		{
-			temp.type = "Star";
-			temp.class_ = "";
-		}
-		else if (temp.type == "planet")
-		{
-			temp.type = "Planet";
-			if (temp.hydrogenMass / temp.mass > 0.01)
-			{
-				if (temp.waterMass / temp.mass > 0.3)
-					temp.class_ = "Neptune";
-				else
-					temp.class_ = "Jupiter";
-			}
-			else
-			{
-				if (temp.waterMass / temp.mass > 0.05)
-					temp.class_ = "Aquaria";
-				else if (temp.ironMass / temp.mass > 0.3)
-					temp.class_ = "Ferria";
-				else
-					temp.class_ = "Terra";
-			}
-		}
-		else if (temp.type == "moon")
-		{
-			if (temp.radius > 200)
-				temp.type = "Moon";
-			else
-				temp.type = "DwarfMoon";
-
-			if (temp.waterMass / temp.mass > 0.05)
-				temp.class_ = "Aquaria";
-			else if (temp.ironMass / temp.mass > 0.3)
-				temp.class_ = "Ferria";
-			else
-				temp.class_ = "Terra";
-		}
-		else if (temp.type == "sso")
-		{
-			if (temp.isAsteroid || temp.radius < 300)
-			{
-				temp.type = "Asteroid";
-				temp.class_ = "Asteroid";
-			}
-			else
-			{
-				temp.type = "DwarfPlanet";
-
-				if (temp.waterMass / temp.mass > 0.05)
-					temp.class_ = "Aquaria";
-				else if (temp.ironMass / temp.mass > 0.3)
-					temp.class_ = "Ferria";
-				else
-					temp.class_ = "Terra";
-			}
-		}
-		else if (temp.type == "blackhole")
-		{
-			temp.type = "Star";
-			temp.class_ = "X";
-		}
-
-		// adds object to global vector
-		object.push_back(temp);
+		// add object to global vector, ignoring nameless fragments
+		if (temp.name != "")
+            object.push_back(temp);
 	}
+}
+
+/*
+
+The reason this is needed is because Universe Sandbox 2 doesn't update the status of its bodies based on orbital relationships.
+You can put an Earth around Jupiter, change some stats, but Earth is still considered a planet, not a moon.
+You can even blow stuff off a star until it's an asteroid, but its core fragment is still registered as a star.
+So this function is here to re-evaluate each bodies according to their orbital relationships and mass, as used by SE.
+
+*/
+
+void Typifier(Object& obj)
+{
+    if (&obj == root || (obj.partner != obj.parent && (obj.parent == root && obj.mass > obj.partner->mass)))
+    {
+        obj.type = "Star"; // even an asteroid-size planemo is considered a "star" by SE
+        return;
+    }
+
+    if (obj.isStar)
+        return;
+    else if (obj.partner->isStar)
+    {
+        if (ClearanceCheck(obj))
+            obj.type = "Planet";
+        else if (obj.isRound)
+            obj.type = "DwarfPlanet";
+        else
+            // mean comet eccentricity is 0.7, while most e=0.4 SSSO's are comets or asteroids of comet origins
+            obj.type = (obj.eccentricity > 0.4) ? "Comet" : "Asteroid";
+    }
+    else if (obj.partner->isRound) // there's no separate type for Moon-moons in SE (yet)
+    {
+        if (obj.isRound)
+            if (obj.mass < obj.partner->mass)
+                obj.type = "Moon";
+            else
+                obj.type = ClearanceCheck(obj) ? "Planet" : "DwarfPlanet";
+        else
+            obj.type = "DwarfMoon";
+    }
+    else // incl. binary comet or asteroid
+        obj.type = (obj.eccentricity > 0.4) ? "Comet" : "Asteroid";
+}
+
+bool ClearanceCheck(Object& obj)
+{
+    if (obj.parent->parent == root)
+        return true;
+    // Pi discriminant for orbital clearance (a mass range of 10e23 can be used instead,
+    // which would make 4 solar system moons dwarf planets if they weren't moons)
+    if (obj.partner != obj.parent) // orbits own barycenter
+    {
+        return (K_KGKGAU * (obj.mass / (pow(obj.parent->parent->mass, 5.0/2.0) * pow(obj.parent->semimajor, 9.0/8.0))) > 1);
+    }
+    else
+        return (K_KGKGAU * (obj.mass / (pow(obj.parent->mass, 5.0/2.0) * pow(obj.semimajor, 9.0/8.0))) > 1);
+}
+
+// don't think a classifier is necessary because SE seems to be able to make sense of it on its own
+
+void Classifier(Object& obj)
+{
+    if (obj.type == "Star")
+    {
+        if (obj.class_ == "blackhole")
+            obj.class_ = "X";
+		else
+            obj.class_ = "";
+    }
+    else
+    {
+        if (obj.hydrogenMass / obj.mass > 0.01)
+        {
+            if (obj.waterMass / obj.mass > 0.3)
+                obj.class_ = "Neptune";
+            else
+                obj.class_ = "Jupiter";
+        }
+        else
+        {
+            if (obj.waterMass / obj.mass > 0.05)
+                obj.class_ = "Aquaria";
+            else if (obj.ironMass / obj.mass > 0.3)
+                obj.class_ = "Ferria";
+            else
+                obj.class_ = "Terra";
+        }
+    }
 }
