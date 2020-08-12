@@ -19,6 +19,8 @@ Some binary math still seems wrong
 Trojans result in bad math (first time I tested a system with large trojans)
 Class identification could be better... classes in output files are often more accurate if (now separate) "classifier" function is disabled
 
+Edit: fixed an issue itroduced by trying to fix trojans and some other small bugs+cleanup
+
 */
 
 #include <string>
@@ -98,8 +100,8 @@ const double PI = 3.1415926535; // it's pi you idiot
 
 void GetData(std::ifstream&);
 void PrintFile(std::ofstream&, Object&);
-void Bond(std::list<Object>&, std::list<Object>::iterator&, Object*, Object*);
-void CreateBinary(std::list<Object>&, Object&, Object&, Object*);
+void Bond(std::list<Object>&, std::list<Object>::iterator&, Object&, Object&);
+void CreateBinary(std::list<Object>&, Object&, Object&);
 void Typifier(Object&);
 void Classifier(Object&);
 
@@ -161,56 +163,59 @@ int main()
 	// sort by descending mass
 	std::sort(object.begin(), object.end(), [](Object const& one, Object const& two){ return ( one.mass > two.mass ); } );
 
-    for (int i = 0; i < size; i++)
+    if (size>1)
     {
-        max_f = 0.0;
-        min_d = std::numeric_limits<double>::max();
-        for (int j = 0; j < size; j++)
+        for (int i = 0; i < size; i++)
         {
-            if (i==j) continue;
-            // identify strongest attractor
-            force = object.at(j).mass / pow(Distance(object.at(i), object.at(j)), 2); // G, m constants
-            if (max_f < force && (i==0 || object.at(i).mass < object.at(j).mass))
+            max_f = 0.0;
+            min_d = std::numeric_limits<double>::max();
+            for (int j = 0; j < size; j++)
             {
-                max_f = force;
-                attractor = &object.at(j);
+                if (i==j) continue;
+                // identify strongest attractor
+                force = object.at(j).mass / pow(Distance(object.at(i), object.at(j)), 2); // G, m constants
+                if (max_f < force && (i==0 || object.at(i).mass < object.at(j).mass))
+                {
+                    max_f = force;
+                    attractor = &object.at(j);
+                }
+                // identify closest neighbor
+                dist = Distance(object.at(i), object.at(j));
+                if (dist < min_d)
+                {
+                    min_d = dist;
+                    neighbor = &object.at(j);
+                }
             }
-            // identify closest neighbor
-            dist = Distance(object.at(i), object.at(j));
-            if (dist < min_d)
+            if (attractor == neighbor){ // else { guaranteed: attractor > neighbor }
+
+                object.at(i).mass > attractor->mass ? Bond(binary, b, object.at(i), *attractor) : Bond(binary, b, *attractor, object.at(i));
+            }
+            else if (object.at(i).mass > neighbor->mass && object.at(i).mass > attractor->mass)
             {
-                min_d = dist;
-                neighbor = &object.at(j);
+                Bond(binary, b, object.at(i), *attractor);
+                Distance(*neighbor, object.at(i)) < Distance(*neighbor, *attractor) ? Bond(binary, b, object.at(i), *neighbor) : Bond(binary, b, *attractor, *neighbor);
             }
-        }
-        if (attractor == neighbor){ // else { guaranteed: attractor > neighbor }
+            else if (object.at(i).mass < neighbor->mass && object.at(i).mass < attractor->mass)
+            {
+                Bond(binary, b, *attractor, *neighbor);
 
-            object.at(i).mass > attractor->mass ? Bond(binary, b, &object.at(i), attractor) : Bond(binary, b, attractor, &object.at(i));
-        }
-        else if (object.at(i).mass > neighbor->mass && object.at(i).mass > attractor->mass)
-        {
-            Bond(binary, b, &object.at(i), attractor);
-            Distance(*neighbor, object.at(i)) < Distance(*neighbor, *attractor) ? Bond(binary, b, &object.at(i), neighbor) : Bond(binary, b, attractor, neighbor);
-        }
-        else if (object.at(i).mass < neighbor->mass && object.at(i).mass < attractor->mass)
-        {
-            Bond(binary, b, attractor, neighbor);
+                neighbor->hillSphereRadius = Distance(*neighbor, *attractor) * (cbrt(neighbor->mass / (3 * attractor->mass)));
+                dist = Distance(object.at(i), *neighbor);
+                if (dist < neighbor->hillSphereRadius)
+                    Bond(binary, b, *neighbor, object.at(i));
+                else // force leftovers to pick a dominant object
+                    Bond(binary, b, *attractor, object.at(i));
+            }
+            else // neighbor < obj < attractor
+            {
+                Bond(binary, b, *attractor, object.at(i));
 
-            neighbor->hillSphereRadius = Distance(*neighbor, *attractor) * (cbrt(neighbor->mass / (3 * attractor->mass)));
-            dist = Distance(object.at(i), *neighbor);
-            if (dist < neighbor->hillSphereRadius)
-                Bond(binary, b, neighbor, &object.at(i));
-            else // force leftovers to pick a dominant object
-                Bond(binary, b, attractor, &object.at(i));
-        }
-        else // neighbor < obj < attractor
-        {
-            Bond(binary, b, attractor, &object.at(i));
-
-            object.at(i).hillSphereRadius = Distance(object.at(i), *attractor) * (cbrt(object.at(i).mass / (3 * attractor->mass)));
-            dist = Distance(object.at(i), *neighbor);
-            if (dist < object.at(i).hillSphereRadius)
-                Bond(binary, b, &object.at(i), neighbor);
+                object.at(i).hillSphereRadius = Distance(object.at(i), *attractor) * (cbrt(object.at(i).mass / (3 * attractor->mass)));
+                dist = Distance(object.at(i), *neighbor);
+                if (dist < object.at(i).hillSphereRadius)
+                    Bond(binary, b, object.at(i), *neighbor);
+            }
         }
     }
 
@@ -245,78 +250,76 @@ int main()
 	return 0;
 }
 
-void Bond(std::list<Object>& binary, std::list<Object>::iterator& b, Object* dom, Object* sub)
+void Bond(std::list<Object>& binary, std::list<Object>::iterator& b, Object& dom, Object& sub)
 {
-
-    if (sub->parent == dom || dom == sub->partner)
+    if (sub.parent == &dom || &dom == sub.partner)
         return;
 
     // whether bonding happens with the massive body or with its barycenter (if partner != parent it's bound to ITS OWN bary)
-    if ((dom->parent != NULL && dom->parent->type == "Barycenter") && dom->parent != dom->partner)
+    if ((dom.parent != NULL && dom.parent->type == "Barycenter") && dom.parent != dom.partner)
     {
-        double forceObj = (sub->mass * dom->mass) / pow(Distance(*sub, *dom), 2);
-        double forceBary = (sub->mass * dom->parent->mass) / pow(Distance(*sub, *dom->parent), 2);
+        double forceObj = (sub.mass * dom.mass) / pow(Distance(sub, dom), 2);
+        double forceBary = (sub.mass * dom.parent->mass) / pow(Distance(sub, *dom.parent), 2);
         if (forceBary > forceObj)
         {
-            if (Distance(*sub, *dom->parent) > Distance(*dom->partner, *dom->parent))
+            if (Distance(sub, *dom.parent) > Distance(*dom.partner, *dom.parent))
             {
-                dom = dom->parent;
-                Bond(binary, b, dom, sub);
+                Bond(binary, b, *dom.parent, sub);
                 return;
             }
         }
     }
 
     // same as above for when Sub already has a Bary with something else than Dom
-    if ((sub->parent != NULL && sub->parent->type == "Barycenter") && sub->parent != sub->partner)
+    if ((sub.parent != NULL && sub.parent->type == "Barycenter") && sub.parent != sub.partner)
     {
-        double forceObj = (dom->mass * sub->mass) / pow(Distance(*dom, *sub), 2);
-        double forceBary = (dom->mass * sub->parent->mass) / pow(Distance(*dom, *sub->parent), 2);
+        double forceObj = (dom.mass * sub.mass) / pow(Distance(dom, sub), 2);
+        double forceBary = (dom.mass * sub.parent->mass) / pow(Distance(dom, *sub.parent), 2);
         if (forceBary > forceObj)
         {
-            sub = sub->parent;
-            Bond(binary, b, dom, sub);
+            Bond(binary, b, dom, *sub.parent);
             return;
         }
     }
 
     // whether bonding is direct or requires a barycenter
-    if (dom->type == "Star" && sub->type == "Star" || (sub->mass / dom->mass) > 0.01)
+    if (dom.type == "Star" && sub.type == "Star" || (sub.mass / dom.mass) > 0.01)
     {
-        CreateBinary(binary, *dom, *sub, dom->partner);
-        dom->partner = sub;
-        sub->partner = dom;
+        // always heavier object first
+        CreateBinary(binary, dom, sub);
+        dom.partner = &sub;
+        sub.partner = &dom;
         b++;
 
-        if (dom->parent != NULL)
+        if (dom.parent != NULL)
         {
-            b->parent = dom->parent;
+            b->parent = dom.parent;
             for (int i=0; i < b->parent->child.size(); i++)
             {
-                if (b->parent->child.at(i) == dom || b->parent->child.at(i) == sub)
+                if (b->parent->child.at(i) == &dom || b->parent->child.at(i) == &sub)
                 b->parent->child.erase(b->parent->child.begin() + i--);
             }
             b->parent->child.push_back(&*b);
         }
-        dom->parent = sub->parent = &*b;
+        dom.parent = sub.parent = &*b;
     }
     else
     {
-        sub->partner = sub->parent = dom;
-        sub->parent->child.push_back(sub);
+        sub.partner = sub.parent = &dom;
+        sub.parent->child.push_back(&sub);
     }
 }
 
-void CreateBinary(std::list<Object>& binaryList, Object& A, Object& B, Object* C)
+void CreateBinary(std::list<Object>& binaryList, Object& A, Object& B)
 {
 	Object temp;
-    temp.isStar = A.isStar && B.isStar; // a barycenter is "stellar" if one of its components is a star
+    // a barycenter is "stellar" if one of its components is a star
+    temp.isStar = A.isStar && B.isStar;
 	temp.name = (A.name + "-" + B.name);
 	temp.type = "Barycenter";
 	temp.mass = A.mass + B.mass;
 	temp.parent = A.parent;
-    if (C != NULL && A.parent != NULL)
-        temp.partner = temp.parent->type == "Barycenter" ? C : temp.parent;
+    temp.partner = A.partner;
 	// This essentially finds the average of the weighted vectors to determine the position of the barycenter
 	double AposRatio = A.mass / temp.mass,
 		BposRatio = B.mass / temp.mass;
@@ -369,8 +372,7 @@ void PrintFile(std::ofstream& f, Object & o)
 		f << "\n\tParentBody\t\t\t\"" << o.parent->name << "\"";
 
 	if (o.type != "Barycenter")
-		f
-		<< "\n\tClass\t\t\t\t\"" << o.class_ << "\""
+		f << "\n\tClass\t\t\t\t\"" << o.class_ << "\""
 		<< "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
 		<< "\n\tRadius\t\t\t\t" << o.radius
 		<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod;
@@ -432,6 +434,10 @@ void CalcOrbit(Object& obj)
 	eccentVect.z = ((VcrossH.z / mu) - (obj.position.z / obj.position.magnitude()));
 	obj.eccentricity = eccentVect.magnitude();
 
+
+
+
+
 	// calculate vector n / for ascending node
 	StateVect one(0.0, 0.0, 1.0), two(momentVect.y * -1.0, momentVect.x, 0.0);
 	StateVect n = CrossProduct(one, two);
@@ -471,7 +477,7 @@ void CalcOrbit(Object& obj)
 	parentTemp.x = (obj.argOfPeriapsis - obj.parent->position.x);
 	parentTemp.y = (obj.argOfPeriapsis - obj.parent->position.y);
 	parentTemp.z = (obj.argOfPeriapsis - obj.parent->position.z);
-	left = Normalize(parentTemp);
+	left = Normalize(parentTemp);Subtract
 	forward = CrossProduct(left, momentVect);
 
 	StateVect rotationAxis, world;
@@ -504,14 +510,17 @@ void CalcMoreOrbit(Object& obj)
 	if (&obj == root)
 		return;
 
-	double mu, mu2, semimajor2;
+	double mu, mu2 = 0, semimajor2 = 0;
 	mu = G * obj.partner->mass;
-	mu2 = G * obj.mass;
 
 	// calculate semi-major axis
 	obj.semimajor = ( 1 / ((2 / obj.position.magnitude()) - (pow(obj.velocity.magnitude(), 2) / mu)) );
-	// calculate partner's semi-major axis (even if very small)
-	semimajor2 = ( 1 / ((2 / obj.partner->position.magnitude()) - (pow(obj.partner->velocity.magnitude(), 2) / mu2)) );
+	// calculate partner's semi-major axis if they're binaries
+	if (&obj == obj.partner->partner)
+    {
+        mu2 = G * obj.mass;
+        semimajor2 = ( 1 / ((2 / obj.partner->position.magnitude()) - (pow(obj.partner->velocity.magnitude(), 2) / mu2)) );
+    }
 
 	obj.period = ( (2 * PI) * (sqrt( pow(obj.semimajor + semimajor2, 3) / ( mu + mu2 ) )) );
 	obj.period /= 3.1556952e7; // converts sec to years;
@@ -783,8 +792,8 @@ void GetData(std::ifstream& inputFile)
 		holder.erase(holder.size() - 1, 1);
 		temp.class_ = holder;
 
-		// add object to global vector, ignoring nameless fragments
-		if (temp.name != "")
+		// add object to global vector, ignoring US2 barycenters (which have R=1m, M=1kg) and nameless fragments
+		if (temp.name != "" && temp.radius != 0.001)
             object.push_back(temp);
 	}
 }
