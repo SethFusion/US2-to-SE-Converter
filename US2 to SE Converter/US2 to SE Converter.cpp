@@ -20,6 +20,7 @@ Trojans result in bad math (first time I tested a system with large trojans)
 Class identification could be better... classes in output files are often more accurate if (now separate) "classifier" function is disabled
 
 Edit: fixed an issue itroduced by trying to fix trojans and some other small bugs+cleanup
+Edit 2: tried to solve obliquity - not working still
 
 */
 
@@ -33,9 +34,9 @@ Edit: fixed an issue itroduced by trying to fix trojans and some other small bug
 #include <algorithm> // for sort()
 #include <limits> // for max double
 
-#define STARCUTOFF 30000*pow(1000000, 4) // 2.5*10e28 ~ 13 Jupiter masses is the Brown Dwarf cutoff used by SE
-#define HYDRCUTOFF 2000*pow(10000, 4) // mass < Mimas of ~2*10e19 is used as cutoff
-#define K_KGKGAU 75.345 * pow(10000000000000, 4)
+#define STARCUTOFF 3e28 // 2.5*10e28 ~ 13 Jupiter masses is the Brown Dwarf cutoff used by SE
+#define HYDRCUTOFF 2e19 // mass < Mimas of ~2*10e19 is used as cutoff
+#define K_KGKGAU 75.345e52
 // In solar-mass, earth-mass & AU units, the PI discriminant constant K = 807.
 // But we use kg, kg, AU instead, so our constant = K*pow(solar-mass, 5.0/2.0)/earth-mass = 7.53445e53
 
@@ -67,6 +68,15 @@ public:
 	}
 };
 
+struct Quaternion {
+    double w, x, y, z;
+};
+
+struct EulerAngles {
+    // argument of obliquity, obliquity, yaw
+    double roll, pitch, yaw;
+};
+
 struct Object
 {
 	std::string name, type, class_;
@@ -76,7 +86,8 @@ struct Object
 	double mass, radius;
 
 	// orbit stuff
-	StateVect position, velocity, angularVelocity, orientation;
+	StateVect position, velocity, angularVelocity;
+	Quaternion orientation;
 	double semimajor, period, inclination, eccentricity, argOfPeriapsis, longOfAscNode, meanAnomaly, hillSphereRadius;
 	double rotationPeriod, obliquity;
 
@@ -117,6 +128,7 @@ double Determinate(std::vector<double>&);
 StateVect Subtract(StateVect&, StateVect&);
 StateVect Add(StateVect&, StateVect&);
 StateVect Normalize(StateVect&);
+EulerAngles QuaternionToEuler(Quaternion&);
 
 int main()
 {
@@ -434,10 +446,6 @@ void CalcOrbit(Object& obj)
 	eccentVect.z = ((VcrossH.z / mu) - (obj.position.z / obj.position.magnitude()));
 	obj.eccentricity = eccentVect.magnitude();
 
-
-
-
-
 	// calculate vector n / for ascending node
 	StateVect one(0.0, 0.0, 1.0), two(momentVect.y * -1.0, momentVect.x, 0.0);
 	StateVect n = CrossProduct(one, two);
@@ -466,11 +474,25 @@ void CalcOrbit(Object& obj)
 	else
 		obj.argOfPeriapsis = ((2 * PI) - acos(DotProduct(n, eccentVect) / (n.magnitude() * eccentVect.magnitude())));
 
-	// Calculates Obliquity
-	obj.obliquity = (acos(DotProduct(obj.angularVelocity, obj.parent->angularVelocity) / (obj.parent->angularVelocity.magnitude()*obj.parent->angularVelocity.magnitude()) ));
-	obj.obliquity = (obj.obliquity * (180 / PI)) - obj.inclination;
-	//obj.obliquity -= 90; // convert to equator
+    EulerAngles angles = QuaternionToEuler(obj.orientation);
 
+/*
+In proper Euler angles:
+1st is precession (arg. of obliquity)
+2nd is axial tilt / obliquity
+3rd is rotation ("yaw" in US2)
+*/
+	angles.pitch = angles.pitch * (180 / PI);
+    angles.roll = angles.roll * (180 / PI);
+	if (angles.yaw >= 0.0)
+		angles.yaw = angles.yaw * (180 / PI);
+	else
+		angles.yaw = ((2 * PI) + angles.yaw) * (180 / PI);
+
+
+    obj.obliquity = angles.pitch + obj.inclination; // relative to orbital plane
+// still wrong!!!
+// std::cout << "\n" << obj.name << "  obl:  " << obj.obliquity << "  arg:  " << angles.roll << "  yaw:  " << angles.yaw << "\n";
 
 /*
 	StateVect left, forward, parentTemp;
@@ -488,8 +510,6 @@ void CalcOrbit(Object& obj)
 
 */
 
-
-
 	obj.argOfPeriapsis = (obj.argOfPeriapsis * (180 / PI)); // convert to degree
 	obj.argOfPeriapsis -= 90; // convert to equator
 
@@ -499,6 +519,54 @@ void CalcOrbit(Object& obj)
 	obj.meanAnomaly -= 90; // convert to equator
 
 	return;
+}
+
+/*
+// from Wikipedia (Tait–Bryan angles)
+EulerAngles QuaternionToEuler(Quaternion& q)
+{
+    EulerAngles angles;
+    // roll (x-axis rotation)
+    double sinr_cosp = 2 * (q.w * q.x + q.y * q.z);
+    double cosr_cosp = 1 - 2 * (q.x * q.x + q.y * q.y);
+    angles.roll = std::atan2(sinr_cosp, cosr_cosp);
+
+    // pitch (y-axis rotation)
+    double sinp = 2 * (q.w * q.y - q.z * q.x);
+    if (std::abs(sinp) >= 1)
+        angles.pitch = std::copysign(PI / 2, sinp); // use 90 degrees if out of range
+    else
+        angles.pitch = std::asin(sinp);
+
+    // yaw (z-axis rotation)
+    double siny_cosp = 2 * (q.w * q.z + q.x * q.y);
+    double cosy_cosp = 1 - 2 * (q.y * q.y + q.z * q.z);
+    angles.yaw = std::atan2(siny_cosp, cosy_cosp);
+
+    return angles;
+}
+*/
+
+// Proper Euler angles ZXZ
+EulerAngles QuaternionToEuler(Quaternion& q)
+{
+    EulerAngles angles;
+
+    double sin2 = (q.x * q.x + q.y * q.y);      // sin(beta)^2
+    double cos2 = (q.w * q.w + q.z * q.z);      // cos(beta)^2
+    double s  = atan(q.z / q.w);                // (gamma+alpha)/2
+    double d  = atan2(q.y, q.x);                // (gamma-alpha)/2
+
+    angles.roll = s - d;                        // alpha
+
+    angles.yaw = s + d;                         // gamma
+
+    if (cos2 != 0.0)
+        angles.pitch = 2.0 * atan(sqrt(sin2/cos2));
+    else
+        angles.pitch = (0.5 > sin2) ? 0 : PI;
+
+    return angles;
 }
 
 void CalcMoreOrbit(Object& obj)
@@ -735,20 +803,21 @@ void GetData(std::ifstream& inputFile)
 		temp.radius = std::stod(holder, &sz);
 		temp.radius /= 1000; // m to km
 
-		std::string y, z;
-		/*
+		std::string x, y, z;
+
 		// find orientation and add x y z to vector
 		while (inputFile >> holder && !(holder.find("\"Orientation\":") + 1));
 		holder.erase(0, 15);
-		y = holder.substr(holder.find(";"));
+		x = holder.substr(holder.find(";"));
+		x.erase(0, 1);
+		y = x.substr(x.find(";"));
 		y.erase(0, 1);
 		z = y.substr(y.find(";"));
 		z.erase(0, 1);
-		temp.orientation.x = std::stod(holder, &sz); // x
-		temp.orientation.y = std::stod(y, &sz); // y
-		temp.orientation.z = std::stod(z, &sz); // z
-		// still one value left
-		*/
+		temp.orientation.w = std::stod(holder, &sz); // quaternion element r
+		temp.orientation.x = std::stod(x, &sz); // quaternion element i
+		temp.orientation.y = std::stod(y, &sz); // quaternion element j
+		temp.orientation.z = std::stod(z, &sz); // quaternion element k
 
 		// finds angular velocity
 		while (inputFile >> holder && !(holder.find("\"AngularVelocity\":") + 1));
