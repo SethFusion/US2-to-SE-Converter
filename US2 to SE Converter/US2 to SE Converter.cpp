@@ -93,7 +93,7 @@ struct Object
 
 	// general
 	int temp;
-	double ironMass, waterMass, hydrogenMass, surfacePressure, greenhouse;
+	double silicateMass, ironMass, waterMass, hydrogenMass, surfacePressure, greenhouse;
 
 	// used for stars
 	bool isStar;
@@ -114,7 +114,6 @@ void PrintFile(std::ofstream&, Object&);
 void Bond(std::list<Object>&, std::list<Object>::iterator&, Object&, Object&);
 void CreateBinary(std::list<Object>&, Object&, Object&);
 void Typifier(Object&);
-void Classifier(Object&);
 
 // math functions
 double Distance(Object&, Object&);
@@ -243,10 +242,7 @@ int main()
 	CalcMoreOrbit(*root);
 
     for (int i = 0; i < size; i++)
-    {
         Typifier(object.at(i));
-        Classifier(object.at(i));
-    }
 
 	std::ofstream starFile(starFileName.c_str());
 	starFile << "StarBarycenter\t\t\"" << binary.begin()->name << "\"\n{}\n";
@@ -357,19 +353,18 @@ void PrintFile(std::ofstream& f, Object & o)
 {
 
 	f << o.type << "\t\t\t\t\t\"" << o.name << "\""
-		<< "\n{";
+		<< "\n{"
+		<< "\n\tParentBody\t\t\t\"" << o.parent->name << "\"";
 	if (&o == root && o.type == "Barycenter")
 	{
-		f << "\n\tParentBody\t\t\t\"" << o.parent->name << "\""
-			<< "\n}\n\n";
+		f << "\n}\n\n";
 		for (int i = 0; i < o.child.size(); i++)
 			PrintFile(f, *o.child.at(i));
 		return;
 	}
 	else if (&o == root && o.type == "Star")
 	{
-		f << "\n\tParentBody\t\t\t\"" << o.parent->name << "\""
-			<< "\n\tLum\t\t\t\t\t" << o.luminosity
+		f << "\n\tLum\t\t\t\t\t" << o.luminosity
 			<< "\n\tTeff\t\t\t\t" << o.temp
 			<< "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
 			<< "\n\tRadius\t\t\t\t" << o.radius
@@ -380,14 +375,19 @@ void PrintFile(std::ofstream& f, Object & o)
 			PrintFile(f, *o.child.at(i));
 		return;
 	}
-	else
-		f << "\n\tParentBody\t\t\t\"" << o.parent->name << "\"";
 
 	if (o.type != "Barycenter")
-		f << "\n\tClass\t\t\t\t\"" << o.class_ << "\""
-		<< "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
+		f << "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
 		<< "\n\tRadius\t\t\t\t" << o.radius
-		<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod;
+		<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod
+		<< "\n\n\tInterior"
+		<< "\n\t{\n\t\tComposition"
+		<< "\n\t\t{"
+		<< "\n\t\t\tHydrogen\t" << o.hydrogenMass
+		<< "\n\t\t\tSilicates\t" << o.silicateMass
+		<< "\n\t\t\tIces\t\t" << o.waterMass
+		<< "\n\t\t\tMetals\t\t" << o.ironMass
+		<< "\n\t\t}\n\t}";
 
 	//f << "\n\tObliquity:\t\t" << o.obliquity
 	f << "\n\n\tOrbit"
@@ -694,6 +694,7 @@ void GetData(std::ifstream& inputFile)
 		temp.ironMass = 0;
 		temp.waterMass = 0;
 		temp.hydrogenMass = 0;
+		double compositionMassTotal = 0.0;
 
 		// finds name
 		while (inputFile >> holder && holder != "\"$type\":\"Body\",");
@@ -749,7 +750,6 @@ void GetData(std::ifstream& inputFile)
 			while (inputFile >> holder && !(holder.find("\"Mass\":") + 1));
 			holder.erase(0, 7);
 			temp.ironMass = std::stod(holder, &sz);
-			//temp.ironMass = (temp.ironMass / (5.9736 * pow(10, 24))); // converts kg to earth masses
 
 			while (inputFile >> holder &&
 				holder != "\"Water\":{" && holder != "\"Hydrogen\":{" &&
@@ -761,7 +761,6 @@ void GetData(std::ifstream& inputFile)
 			while (inputFile >> holder && !(holder.find("\"Mass\":") + 1));
 			holder.erase(0, 7);
 			temp.waterMass = std::stod(holder, &sz);
-			//temp.waterMass = (temp.waterMass / (5.9736 * pow(10, 24))); // converts kg to earth masses
 
 			while (inputFile >> holder &&
 				holder != "\"Hydrogen\":{" &&
@@ -773,7 +772,6 @@ void GetData(std::ifstream& inputFile)
 			while (inputFile >> holder && !(holder.find("\"Mass\":") + 1));
 			holder.erase(0, 7);
 			temp.hydrogenMass = std::stod(holder, &sz);
-			//temp.hydrogenMass = (temp.hydrogenMass / (5.9736 * pow(10, 24))); // converts kg to earth masses
 
 			while (inputFile >> holder && (!(holder.find("\"Id\":") + 1)));
 		}
@@ -795,7 +793,15 @@ void GetData(std::ifstream& inputFile)
             temp.type = ""; // will be dealt with after hierarchy is found
         }
         temp.isRound = temp.mass > HYDRCUTOFF;
-        // in reality hydrostatic equilibrium is determined by shape, but SU2 doesn't seem to store this information
+        // in reality hydrostatic equilibrium is determined by shape, but US2 doesn't seem to store this information
+
+		// converts composition into %'s to be printed for SE
+		compositionMassTotal = temp.hydrogenMass + temp.waterMass + temp.ironMass;
+		temp.silicateMass = temp.mass - compositionMassTotal;
+		temp.hydrogenMass /= temp.mass / 100;
+		temp.silicateMass /= temp.mass / 100;
+		temp.waterMass /= temp.mass / 100;
+		temp.ironMass /= temp.mass / 100;
 
 		// find radius
 		while (inputFile >> holder && !(holder.find("\"Radius\":") + 1));
@@ -924,34 +930,3 @@ bool ClearanceCheck(Object& obj)
         return (K_KGKGAU * (obj.mass / (pow(obj.parent->mass, 5.0/2.0) * pow(obj.semimajor, 9.0/8.0))) > 1);
 }
 
-// don't think a classifier is necessary because SE seems to be able to make sense of it on its own
-
-void Classifier(Object& obj)
-{
-    if (obj.type == "Star")
-    {
-        if (obj.class_ == "blackhole")
-            obj.class_ = "X";
-		else
-            obj.class_ = "";
-    }
-    else
-    {
-        if (obj.hydrogenMass / obj.mass > 0.01)
-        {
-            if (obj.waterMass / obj.mass > 0.3)
-                obj.class_ = "Neptune";
-            else
-                obj.class_ = "Jupiter";
-        }
-        else
-        {
-            if (obj.waterMass / obj.mass > 0.05)
-                obj.class_ = "Aquaria";
-            else if (obj.ironMass / obj.mass > 0.3)
-                obj.class_ = "Ferria";
-            else
-                obj.class_ = "Terra";
-        }
-    }
-}
