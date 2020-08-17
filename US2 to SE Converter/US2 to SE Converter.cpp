@@ -1,22 +1,56 @@
+/*
 
+Fixed since last version:
+
+Changed the way type is identified, reasons:
+1. half of the objects were the wrong type because SU2 doesn't update types of objects you modify
+2. type now follows hierarchy and astronomical definitions, such as clearing orbits
+3. dwarf planets are identified correctly, dwarf moons based on mass cutoff
+4. will be easy to add support for planemo and moonmoon types if those are added to SE
+Separated class identification to its own function for brevity
+Removed some old unneeded code
+Nameless fragments are now skipped by input function
+Recursive barycenters fixed (again...)
+
+Remaining Bugs:
+
+Obliquity is still 100% broken
+Some binary math still seems wrong
+Trojans result in bad math (first time I tested a system with large trojans)
+Class identification could be better... classes in output files are often more accurate if (now separate) "classifier" function is disabled
+
+Edit: fixed an issue itroduced by trying to fix trojans and some other small bugs+cleanup
+Edit 2: tried to solve obliquity - not working still
+
+*/
+
+#include <string>
 #include <iostream>
 #include <fstream>
 #include <vector>
 #include <list>
-#include <string>
 #include <math.h>
+
+#include <algorithm> // for sort()
+#include <limits> // for max double
+
+#define STARCUTOFF 3e28 // 2.5*10e28 ~ 13 Jupiter masses is the Brown Dwarf cutoff used by SE
+#define HYDRCUTOFF 2e19 // mass < Mimas of ~2*10e19 is used as cutoff
+#define K_KGKGAU 75.345e52
+// In solar-mass, earth-mass & AU units, the PI discriminant constant K = 807.
+// But we use kg, kg, AU instead, so our constant = K*pow(solar-mass, 5.0/2.0)/earth-mass = 7.53445e53
 
 /*
 	Listen here...
 
 	Before you start judging this code for how ugly it is, just remember that I'm no physics major and
-	this shit really took it out of me. Yeah, there are probably some optimizations this garbage could 
+	this shit really took it out of me. Yeah, there are probably some optimizations this garbage could
 	use. In fact I know there are parts of this I only wrote for testing, and then left in because it
-	actually worked. I'll even say this: it is the ugliest program I've ever written. But you know what? 
-	It gets the job done, for the general case, and that's all I need it to do. 
+	actually worked. I'll even say this: it is the ugliest program I've ever written. But you know what?
+	It gets the job done, for the general case, and that's all I need it to do.
 */
 
-class StateVect 
+class StateVect
 {
 public:
 	double x, y, z;
@@ -34,15 +68,26 @@ public:
 	}
 };
 
+struct Quaternion {
+    double w, x, y, z;
+};
+
+struct EulerAngles {
+    // argument of obliquity, obliquity, yaw
+    double roll, pitch, yaw;
+};
+
 struct Object
 {
 	std::string name, type, class_;
 	Object* parent;
+    Object* partner; // for binaries and objects of similar mass, otherwise it's == parent
 	std::vector<Object*> child;
 	double mass, radius;
 
 	// orbit stuff
-	StateVect position, velocity, angularVelocity, orientation;
+	StateVect position, velocity, angularVelocity;
+	Quaternion orientation;
 	double semimajor, period, inclination, eccentricity, argOfPeriapsis, longOfAscNode, meanAnomaly, hillSphereRadius;
 	double rotationPeriod, obliquity;
 
@@ -54,8 +99,8 @@ struct Object
 	bool isStar;
 	double luminosity;
 
-	// asteroid?
-	bool isAsteroid;
+	// in hydrostatic equilibrium?
+	bool isRound;
 };
 std::string::size_type sz;
 std::vector<Object> object;
@@ -66,11 +111,16 @@ const double PI = 3.1415926535; // it's pi you idiot
 
 void GetData(std::ifstream&);
 void PrintFile(std::ofstream&, Object&);
+void Bond(std::list<Object>&, std::list<Object>::iterator&, Object&, Object&);
 void CreateBinary(std::list<Object>&, Object&, Object&);
+void Typifier(Object&);
+void Classifier(Object&);
 
 // math functions
 double Distance(Object&, Object&);
 void CalcOrbit(Object&);
+void CalcMoreOrbit(Object&);
+bool ClearanceCheck(Object&);
 StateVect CrossProduct(StateVect&, StateVect&);
 double DotProduct(StateVect&, StateVect&);
 StateVect Scale(double, StateVect&);
@@ -78,6 +128,7 @@ double Determinate(std::vector<double>&);
 StateVect Subtract(StateVect&, StateVect&);
 StateVect Add(StateVect&, StateVect&);
 StateVect Normalize(StateVect&);
+EulerAngles QuaternionToEuler(Quaternion&);
 
 int main()
 {
@@ -111,8 +162,9 @@ int main()
 	GetData(inputFile);
 	inputFile.close();
 
-	std::vector<Object> star, planet, moon; // These vectors are only for processing types of objects
-	
+    Object *attractor = NULL, *neighbor = NULL;
+    double force, dist, max_f, min_d;
+
 	std::list<Object> binary;
 	Object systemO;
 	systemO.name = systemName + " System";
@@ -120,218 +172,81 @@ int main()
 	std::list<Object>::iterator b = binary.begin(); // binary object counter
 
 	int size = object.size();
-	for (int i = 0; i < size; i++)
-	{
-		if (object.at(i).type == "Moon" || object.at(i).type == "DwarfMoon" || object.at(i).type == "Asteroid")
-			moon.push_back(object.at(i));
-		else if (object.at(i).type == "Planet" || object.at(i).type == "DwarfPlanet")
-			planet.push_back(object.at(i));
-		else if (object.at(i).type == "Star")
-			star.push_back(object.at(i));
-	}
+	// sort by descending mass
+	std::sort(object.begin(), object.end(), [](Object const& one, Object const& two){ return ( one.mass > two.mass ); } );
 
-	if (star.size() > 1)
-	{
-		if (star.size() > 2)
-		{
-			std::vector<Object*> hierarchyVect;
-			for (int i = 0; i < star.size(); i++)
-				hierarchyVect.push_back(&star.at(i));
-			int numOfBarys = hierarchyVect.size() - 1;
+    if (size>1)
+    {
+        for (int i = 0; i < size; i++)
+        {
+            max_f = 0.0;
+            min_d = std::numeric_limits<double>::max();
+            for (int j = 0; j < size; j++)
+            {
+                if (i==j) continue;
+                // identify strongest attractor
+                force = object.at(j).mass / pow(Distance(object.at(i), object.at(j)), 2); // G, m constants
+                if (max_f < force && (i==0 || object.at(i).mass < object.at(j).mass))
+                {
+                    max_f = force;
+                    attractor = &object.at(j);
+                }
+                // identify closest neighbor
+                dist = Distance(object.at(i), object.at(j));
+                if (dist < min_d)
+                {
+                    min_d = dist;
+                    neighbor = &object.at(j);
+                }
+            }
+            if (attractor == neighbor){ // else { guaranteed: attractor > neighbor }
 
-			for (int binaryCounter = 0; binaryCounter < numOfBarys; binaryCounter++)
-			{
-				int size = hierarchyVect.size();
-				double max = 0.0; 
-				int maxi = 0, maxj = 0;
-				double forceTable[16][16];
+                object.at(i).mass > attractor->mass ? Bond(binary, b, object.at(i), *attractor) : Bond(binary, b, *attractor, object.at(i));
+            }
+            else if (object.at(i).mass > neighbor->mass && object.at(i).mass > attractor->mass)
+            {
+                Bond(binary, b, object.at(i), *attractor);
+                Distance(*neighbor, object.at(i)) < Distance(*neighbor, *attractor) ? Bond(binary, b, object.at(i), *neighbor) : Bond(binary, b, *attractor, *neighbor);
+            }
+            else if (object.at(i).mass < neighbor->mass && object.at(i).mass < attractor->mass)
+            {
+                Bond(binary, b, *attractor, *neighbor);
 
-				// these two loops fill out the table used to determine binary objects
-				for (int i = 0; i < size; i++)
-				{
-					for (int j = 0; j < size; j++)
-					{
-						if (i > j&& i < size && j < size)
-						{
-							forceTable[i][j] = (G * hierarchyVect.at(i)->mass * hierarchyVect.at(j)->mass) / pow(Distance(*hierarchyVect.at(i), *hierarchyVect.at(j)), 2);
-							if (max < forceTable[i][j])
-							{
-								max = forceTable[i][j];
-								maxi = i;
-								maxj = j;
-							}
-						}
-						else
-							forceTable[i][j] = NULL;
-					}
-				}
-				CreateBinary(binary, *hierarchyVect.at(maxi), *hierarchyVect.at(maxj));
-				b++;
-				hierarchyVect.at(maxi)->parent = hierarchyVect.at(maxj)->parent = &*b;
-				hierarchyVect.push_back(&*b);
+                neighbor->hillSphereRadius = Distance(*neighbor, *attractor) * (cbrt(neighbor->mass / (3 * attractor->mass)));
+                dist = Distance(object.at(i), *neighbor);
+                if (dist < neighbor->hillSphereRadius)
+                    Bond(binary, b, *neighbor, object.at(i));
+                else // force leftovers to pick a dominant object
+                    Bond(binary, b, *attractor, object.at(i));
+            }
+            else // neighbor < obj < attractor
+            {
+                Bond(binary, b, *attractor, object.at(i));
 
-				hierarchyVect.erase(hierarchyVect.begin() + maxi);
-				hierarchyVect.erase(hierarchyVect.begin() + maxj);
-			}
+                object.at(i).hillSphereRadius = Distance(object.at(i), *attractor) * (cbrt(object.at(i).mass / (3 * attractor->mass)));
+                dist = Distance(object.at(i), *neighbor);
+                if (dist < object.at(i).hillSphereRadius)
+                    Bond(binary, b, object.at(i), *neighbor);
+            }
+        }
+    }
 
-			root = &*b;
-			while (root->parent != NULL)
-				root = root->parent;
-		}
-		else
-		{
-			CreateBinary(binary, star.at(0), star.at(1));
-			b++;
-			star.at(0).parent = star.at(1).parent = root = &*b;
-		}
-	}
-	else
-		root = &star.at(0);
-	
-	// finds the parent of all planets
-	for (int i = 0; i < planet.size(); i++)
-	{
-		double F = 0.0; // force of the current star on the current planet
-		int parent = 0; // positon of the most attractive star
-		for (int j = 0; j < star.size(); j++)
-		{
-			double f = (G * planet.at(i).mass * star.at(j).mass) / pow(Distance(planet.at(i), star.at(j)), 2);
-			// checks the current star's attractive force with the largest known force
-			// If the current star's force is larger than any others, the parent
-			// is set to the current star
-			if (f > F)
-			{
-				F = f;
-				parent = j;
-			}
-		}
+	// as long as all objects are connected up the hierarchy, this will find the root
+	root = &object.at(0);
+	while (root->parent != NULL)
+		root = root->parent;
+    root->partner = root->parent = root;
 
-		planet.at(i).parent = &star.at(parent);
-		if (planet.at(i).parent->parent != NULL && planet.at(i).parent->parent->type == "Barycenter")
-		{
-			double forceStar = (G * planet.at(i).mass * planet.at(i).parent->mass) / pow(Distance(planet.at(i), *planet.at(i).parent), 2);
-			double forceBary = (G * planet.at(i).mass * planet.at(i).parent->parent->mass) / pow(Distance(planet.at(i), *planet.at(i).parent->parent), 2);
-			if (forceBary > forceStar)
-				planet.at(i).parent = planet.at(i).parent->parent;
-
-			planet.at(i).parent->child.push_back(&planet.at(i));
-		}
-		else
-		{
-			planet.at(i).parent->child.push_back(&planet.at(i));
-		}
-
-		// hill sphere is used to check for moons
-		planet.at(i).hillSphereRadius = Distance(planet.at(i), *planet.at(i).parent) * (cbrt(planet.at(i).mass / (3 * planet.at(i).parent->mass)));
-	}
-
-	// looks for binary planet systems
-	for (int i = 0; i < planet.size(); i++)
-	{
-		if (planet.at(i).parent->type != "Barycenter") // Find another way to stop planets from going through twice!
-		{
-			for (int j = 0; j < planet.size(); j++)
-			{
-				double dist = Distance(planet.at(i), planet.at(j));
-				if (dist < planet.at(i).hillSphereRadius && dist != 0)
-				{
-					CreateBinary(binary, planet.at(i), planet.at(j));
-					b++;
-
-					b->parent = planet.at(i).parent;
-					for (int iterate = 0; iterate < b->parent->child.size(); iterate++)
-					{
-						if (b->parent->child.at(iterate) == &planet.at(i) || b->parent->child.at(iterate) == &planet.at(j))
-							b->parent->child.erase(b->parent->child.begin() + iterate--);
-					}
-					b->parent->child.push_back(&*b);
-					planet.at(i).parent = planet.at(j).parent = &*b;
-				}	
-			}
-		}
-	}
-
-	// so bassically this uses the psudo-hill sphere radius of the planet to check if any moons are within that radius
-	// If they are within it, it likely means that planet is the moons parent
-	for (int i = 0; i < moon.size(); i++)
-	{
-		int parent = 0;
-		for (int j = 0; j < planet.size(); j++)
-		{
-			if (Distance(moon.at(i), planet.at(j)) < planet.at(j).hillSphereRadius)
-			{
-				if (planet.at(j).parent->type == "Barycenter")
-				{
-					double forcePlanet = (G * moon.at(i).mass * planet.at(j).mass) / pow(Distance(moon.at(i), planet.at(j)), 2);
-					double forceBary = (G * moon.at(i).mass * planet.at(j).parent->mass) / pow(Distance(moon.at(i), *planet.at(j).parent), 2);
-					if (forceBary > forcePlanet)
-					{
-						parent = j;
-						moon.at(i).parent = planet.at(j).parent;
-						planet.at(j).parent->child.push_back(&moon.at(i));
-					}
-					else
-					{
-						parent = j;
-						moon.at(i).parent = &planet.at(j);
-						planet.at(j).child.push_back(&moon.at(i));
-					}
-				}
-				else
-				{
-					parent = j;
-					moon.at(i).parent = &planet.at(j);
-					planet.at(j).child.push_back(&moon.at(i));
-				}
-				j = planet.size();
-			}
-		}
-		// If the moon fails to find a parent body, it will search the star list
-		// for whatever star is pulling on it the most
-		if (moon.at(i).parent == NULL)
-		{
-			double F = 0.0;
-			for (int j = 0; j < star.size(); j++)
-			{
-				double f = (G * moon.at(i).mass * star.at(j).mass) / pow(Distance(moon.at(i), star.at(j)), 2);
-				if (f > F)
-				{
-					F = f;
-					parent = j;
-				}
-			}
-			moon.at(i).parent = &star.at(parent);
-		}
-	}
-
-	// looks for binary planet-moon systems, based on mass
-	for (int i = 0; i < moon.size(); i++)
-	{
-		if ((moon.at(i).mass / moon.at(i).parent->mass) > 0.01)
-		{
-			CreateBinary(binary, *moon.at(i).parent, moon.at(i));
-			b++;
-
-			b->parent = moon.at(i).parent->parent;
-			for (int iterate = 0; iterate < b->parent->child.size(); iterate++)
-			{
-				if (b->parent->child.at(iterate) == moon.at(i).parent)
-					b->parent->child.erase(b->parent->child.begin() + iterate--);
-			}
-
-			for (int iterate = 0; iterate < moon.at(i).parent->child.size(); iterate++)
-			{
-				if (moon.at(i).parent->child.at(iterate) == &moon.at(i))
-					moon.at(i).parent->child.erase(moon.at(i).parent->child.begin() + iterate--);
-			}
-
-			b->parent->child.push_back(&*b);
-			moon.at(i).parent = moon.at(i).parent->parent = &*b;
-		}
-	}
-
-	// this is where the magic happens
+    // this is where the magic happens
 	CalcOrbit(*root);
+	// requires partners (binaries) to already have some orbit info
+	CalcMoreOrbit(*root);
+
+    for (int i = 0; i < size; i++)
+    {
+        Typifier(object.at(i));
+        Classifier(object.at(i));
+    }
 
 	std::ofstream starFile(starFileName.c_str());
 	starFile << "StarBarycenter\t\t\"" << binary.begin()->name << "\"\n{}\n";
@@ -347,9 +262,99 @@ int main()
 	return 0;
 }
 
+void Bond(std::list<Object>& binary, std::list<Object>::iterator& b, Object& dom, Object& sub)
+{
+    if (sub.parent == &dom || &dom == sub.partner)
+        return;
+
+    // whether bonding happens with the massive body or with its barycenter (if partner != parent it's bound to ITS OWN bary)
+    if ((dom.parent != NULL && dom.parent->type == "Barycenter") && dom.parent != dom.partner)
+    {
+        double forceObj = (sub.mass * dom.mass) / pow(Distance(sub, dom), 2);
+        double forceBary = (sub.mass * dom.parent->mass) / pow(Distance(sub, *dom.parent), 2);
+        if (forceBary > forceObj)
+        {
+            if (Distance(sub, *dom.parent) > Distance(*dom.partner, *dom.parent))
+            {
+                Bond(binary, b, *dom.parent, sub);
+                return;
+            }
+        }
+    }
+
+    // same as above for when Sub already has a Bary with something else than Dom
+    if ((sub.parent != NULL && sub.parent->type == "Barycenter") && sub.parent != sub.partner)
+    {
+        double forceObj = (dom.mass * sub.mass) / pow(Distance(dom, sub), 2);
+        double forceBary = (dom.mass * sub.parent->mass) / pow(Distance(dom, *sub.parent), 2);
+        if (forceBary > forceObj)
+        {
+            Bond(binary, b, dom, *sub.parent);
+            return;
+        }
+    }
+
+    // whether bonding is direct or requires a barycenter
+    if (dom.type == "Star" && sub.type == "Star" || (sub.mass / dom.mass) > 0.01)
+    {
+        // always heavier object first
+        CreateBinary(binary, dom, sub);
+        dom.partner = &sub;
+        sub.partner = &dom;
+        b++;
+
+        if (dom.parent != NULL)
+        {
+            b->parent = dom.parent;
+            for (int i=0; i < b->parent->child.size(); i++)
+            {
+                if (b->parent->child.at(i) == &dom || b->parent->child.at(i) == &sub)
+                b->parent->child.erase(b->parent->child.begin() + i--);
+            }
+            b->parent->child.push_back(&*b);
+        }
+        dom.parent = sub.parent = &*b;
+    }
+    else
+    {
+        sub.partner = sub.parent = &dom;
+        sub.parent->child.push_back(&sub);
+    }
+}
+
+void CreateBinary(std::list<Object>& binaryList, Object& A, Object& B)
+{
+	Object temp;
+    // a barycenter is "stellar" if one of its components is a star
+    temp.isStar = A.isStar && B.isStar;
+	temp.name = (A.name + "-" + B.name);
+	temp.type = "Barycenter";
+	temp.mass = A.mass + B.mass;
+	temp.parent = A.parent;
+    temp.partner = A.partner;
+	// This essentially finds the average of the weighted vectors to determine the position of the barycenter
+	double AposRatio = A.mass / temp.mass,
+		BposRatio = B.mass / temp.mass;
+	StateVect AposScaled = Scale(AposRatio, A.position),
+		BposScaled = Scale(BposRatio, B.position);
+	temp.position = Add(AposScaled, BposScaled);
+
+	// this also averages the velocity vectors, weighted based on distance from barycenter, to find the velocity of the barycenter
+	double distTotal = Distance(A, B),
+		AvelRatio = (Distance(B, temp) / distTotal),
+		BvelRatio = (Distance(A, temp) / distTotal);
+	StateVect AvelScaled = Scale(AvelRatio, A.velocity),
+		BvelScaled = Scale(BvelRatio, B.velocity);
+	temp.velocity = Add(AvelScaled, BvelScaled);
+
+	temp.child.push_back(&A);
+	temp.child.push_back(&B);
+	//temp.mass = 5.75e18;
+	binaryList.push_back(temp);
+}
+
 void PrintFile(std::ofstream& f, Object & o)
 {
-	
 
 	f << o.type << "\t\t\t\t\t\"" << o.name << "\""
 		<< "\n{";
@@ -369,6 +374,7 @@ void PrintFile(std::ofstream& f, Object & o)
 			<< "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
 			<< "\n\tRadius\t\t\t\t" << o.radius
 			<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod
+            //<< "\n\tObliquity:\t\t" << o.obliquity
 			<< "\n}\n\n";
 		for (int i = 0; i < o.child.size(); i++)
 			PrintFile(f, *o.child.at(i));
@@ -377,18 +383,14 @@ void PrintFile(std::ofstream& f, Object & o)
 	else
 		f << "\n\tParentBody\t\t\t\"" << o.parent->name << "\"";
 
-	if (o.type == "Star")
-	{
-		f << "\n\tLum\t\t\t\t\t" << o.luminosity
-			<< "\n\tTeff\t\t\t\t" << o.temp;
-	}
-	else
-		f << "\n\tClass\t\t\t\t\"" << o.class_ << "\"";
-
-		f << "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
+	if (o.type != "Barycenter")
+		f << "\n\tClass\t\t\t\t\"" << o.class_ << "\""
+		<< "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
 		<< "\n\tRadius\t\t\t\t" << o.radius
-		<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod
-		<< "\n\n\tOrbit"
+		<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod;
+
+	//f << "\n\tObliquity:\t\t" << o.obliquity
+	f << "\n\n\tOrbit"
 		<< "\n\t{"
 		<< "\n\t\tRefPlane\t\t\"Equator\""
 		<< "\n\t\tSemiMajorAxis\t" << o.semimajor
@@ -398,65 +400,38 @@ void PrintFile(std::ofstream& f, Object & o)
 		<< "\n\t\tAscendingNode\t" << o.longOfAscNode
 		<< "\n\t\tArgOfPericenter\t" << o.argOfPeriapsis
 		<< "\n\t\tMeanAnomaly\t\t" << o.meanAnomaly
-		<< "\n\t}"
-		<< "\n\n\tAtmosphere"
+		<< "\n\t}";
+
+	if (o.type != "Barycenter")
+		f << "\n\n\tAtmosphere"
 		<< "\n\t{"
 		<< "\n\t\tPressure\t\t" << o.surfacePressure
 		<< "\n\t\tGreenhouse\t\t" << o.greenhouse
-		<< "\n\t}"
-		<< "\n}\n\n";
-	
+		<< "\n\t}";
+
+	f << "\n}\n\n";
+
 	for (int i = 0; i < o.child.size(); i++)
 		PrintFile(f, *o.child.at(i));
 	return;
 }
 
-void CreateBinary(std::list<Object>& binaryList, Object& A, Object& B)
-{
-	Object temp;
-	temp.isAsteroid = false;
-	temp.isStar = false;
-	temp.name = (A.name + "-" + B.name);
-	temp.type = "Barycenter";
-	temp.mass = A.mass + B.mass;
-	temp.parent = A.parent;
-	// This essentially finds the average of the weighted vectors to determine the positon iof the barycenter
-	double AposRatio = A.mass / temp.mass, 
-		BposRatio = B.mass / temp.mass;
-	StateVect AposScaled = Scale(AposRatio, A.position),
-		BposScaled = Scale(BposRatio, B.position);
-	temp.position = Add(AposScaled, BposScaled);
-	
-	// this also averages the velocity vectors, weighted based on distance from barycenter, to find the velocity of the barycenter
-	double distTotal = Distance(A, B), 
-		AvelRatio = (Distance(B, temp) / distTotal), 
-		BvelRatio = (Distance(A, temp) / distTotal);
-	StateVect AvelScaled = Scale(AvelRatio, A.velocity),
-		BvelScaled = Scale(BvelRatio, B.velocity);
-	temp.velocity = Add(AvelScaled, BvelScaled);
-
-	temp.child.push_back(&A);
-	temp.child.push_back(&B);
-	//temp.mass = 5.75e18;
-	binaryList.push_back(temp);
-}
-
 void CalcOrbit(Object& obj)
 {
+
 	for (int i = 0; i < obj.child.size(); i++)
 		CalcOrbit(*obj.child.at(i));
 
 	if (&obj == root)
 		return;
 
-	double mu;
-	mu = G * obj.parent->mass;
-	
+	double mu = G * obj.parent->mass;
+
 	obj.position = Subtract(obj.position, obj.parent->position);
 	obj.velocity = Subtract(obj.velocity, obj.parent->velocity);
 
 	StateVect momentVect;
-	// caculate the momentum vector h
+	// calculate the momentum vector h
 	momentVect = CrossProduct(obj.position, obj.velocity);
 
 	// calculate inclination
@@ -464,7 +439,7 @@ void CalcOrbit(Object& obj)
 	obj.inclination = (obj.inclination * (180 / PI));
 	obj.inclination -= 90; // convert to equator
 
-	// calcuate eccentricity vector and eccentricity
+	// calculate eccentricity vector and eccentricity
 	StateVect eccentVect, VcrossH = CrossProduct(obj.velocity, momentVect);
 	eccentVect.x = ((VcrossH.x / mu) - (obj.position.x / obj.position.magnitude()));
 	eccentVect.y = ((VcrossH.y / mu) - (obj.position.y / obj.position.magnitude()));
@@ -499,21 +474,41 @@ void CalcOrbit(Object& obj)
 	else
 		obj.argOfPeriapsis = ((2 * PI) - acos(DotProduct(n, eccentVect) / (n.magnitude() * eccentVect.magnitude())));
 
-	// Calculates Obliquity
+    EulerAngles angles = QuaternionToEuler(obj.orientation);
+
+/*
+In proper Euler angles:
+1st is precession (arg. of obliquity)
+2nd is axial tilt / obliquity
+3rd is rotation ("yaw" in US2)
+*/
+	angles.pitch = angles.pitch * (180 / PI);
+    angles.roll = angles.roll * (180 / PI);
+	if (angles.yaw >= 0.0)
+		angles.yaw = angles.yaw * (180 / PI);
+	else
+		angles.yaw = ((2 * PI) + angles.yaw) * (180 / PI);
+
+
+    obj.obliquity = angles.pitch + obj.inclination; // relative to orbital plane
+// still wrong!!!
+// std::cout << "\n" << obj.name << "  obl:  " << obj.obliquity << "  arg:  " << angles.roll << "  yaw:  " << angles.yaw << "\n";
+
+/*
 	StateVect left, forward, parentTemp;
 	parentTemp.x = (obj.argOfPeriapsis - obj.parent->position.x);
 	parentTemp.y = (obj.argOfPeriapsis - obj.parent->position.y);
 	parentTemp.z = (obj.argOfPeriapsis - obj.parent->position.z);
-	left = Normalize(parentTemp);
+	left = Normalize(parentTemp);Subtract
 	forward = CrossProduct(left, momentVect);
-	
+
 	StateVect rotationAxis, world;
 	rotationAxis = Normalize(obj.angularVelocity);
-	// world = 
+	// world =
 	obj.obliquity = (PI - acos(DotProduct(momentVect, world)));
-	// orgument of obliquity 
+	// argument of obliquity
 
-
+*/
 
 	obj.argOfPeriapsis = (obj.argOfPeriapsis * (180 / PI)); // convert to degree
 	obj.argOfPeriapsis -= 90; // convert to equator
@@ -523,10 +518,79 @@ void CalcOrbit(Object& obj)
 	obj.meanAnomaly = (obj.meanAnomaly * (180 / PI));
 	obj.meanAnomaly -= 90; // convert to equator
 
-	// calulate semi-major axis
-	obj.semimajor = ( 1 / ((2 / obj.position.magnitude()) - (pow(obj.velocity.magnitude(), 2) / mu)) );
+	return;
+}
 
-	obj.period = ( (2 * PI) * (sqrt( pow(obj.semimajor, 3) / mu )) );
+/*
+// from Wikipedia (Tait–Bryan angles)
+EulerAngles QuaternionToEuler(Quaternion& q)
+{
+    EulerAngles angles;
+    // roll (x-axis rotation)
+    double sinr_cosp = 2 * (q.w * q.x + q.y * q.z);
+    double cosr_cosp = 1 - 2 * (q.x * q.x + q.y * q.y);
+    angles.roll = std::atan2(sinr_cosp, cosr_cosp);
+
+    // pitch (y-axis rotation)
+    double sinp = 2 * (q.w * q.y - q.z * q.x);
+    if (std::abs(sinp) >= 1)
+        angles.pitch = std::copysign(PI / 2, sinp); // use 90 degrees if out of range
+    else
+        angles.pitch = std::asin(sinp);
+
+    // yaw (z-axis rotation)
+    double siny_cosp = 2 * (q.w * q.z + q.x * q.y);
+    double cosy_cosp = 1 - 2 * (q.y * q.y + q.z * q.z);
+    angles.yaw = std::atan2(siny_cosp, cosy_cosp);
+
+    return angles;
+}
+*/
+
+// Proper Euler angles ZXZ
+EulerAngles QuaternionToEuler(Quaternion& q)
+{
+    EulerAngles angles;
+
+    double sin2 = (q.x * q.x + q.y * q.y);      // sin(beta)^2
+    double cos2 = (q.w * q.w + q.z * q.z);      // cos(beta)^2
+    double s  = atan(q.z / q.w);                // (gamma+alpha)/2
+    double d  = atan2(q.y, q.x);                // (gamma-alpha)/2
+
+    angles.roll = s - d;                        // alpha
+
+    angles.yaw = s + d;                         // gamma
+
+    if (cos2 != 0.0)
+        angles.pitch = 2.0 * atan(sqrt(sin2/cos2));
+    else
+        angles.pitch = (0.5 > sin2) ? 0 : PI;
+
+    return angles;
+}
+
+void CalcMoreOrbit(Object& obj)
+{
+
+	for (int i = 0; i < obj.child.size(); i++)
+		CalcMoreOrbit(*obj.child.at(i));
+
+	if (&obj == root)
+		return;
+
+	double mu, mu2 = 0, semimajor2 = 0;
+	mu = G * obj.partner->mass;
+
+	// calculate semi-major axis
+	obj.semimajor = ( 1 / ((2 / obj.position.magnitude()) - (pow(obj.velocity.magnitude(), 2) / mu)) );
+	// calculate partner's semi-major axis if they're binaries
+	if (&obj == obj.partner->partner)
+    {
+        mu2 = G * obj.mass;
+        semimajor2 = ( 1 / ((2 / obj.partner->position.magnitude()) - (pow(obj.partner->velocity.magnitude(), 2) / mu2)) );
+    }
+
+	obj.period = ( (2 * PI) * (sqrt( pow(obj.semimajor + semimajor2, 3) / ( mu + mu2 ) )) );
 	obj.period /= 3.1556952e7; // converts sec to years;
 
 	obj.semimajor /= 1.496e11; // converts m to AU
@@ -534,12 +598,6 @@ void CalcOrbit(Object& obj)
 
 	return;
 }
-
-
-
-
-
-
 
 double Distance(Object& A, Object& B)
 {
@@ -624,20 +682,14 @@ StateVect Normalize(StateVect& a)
 	return temp;
 }
 
-
-
-
-
-
 void GetData(std::ifstream& inputFile)
 {
 	std::string holder;
-	
+
 	while (true)
 	{
 		Object temp;
 		temp.parent = NULL;
-		temp.isAsteroid = false;
 		temp.isStar = false;
 		temp.ironMass = 0;
 		temp.waterMass = 0;
@@ -657,7 +709,6 @@ void GetData(std::ifstream& inputFile)
 		while (inputFile >> holder && !(holder.find("\"SurfaceTemperature\":") + 1) && !(holder.find("\"Id\":") + 1));
 		if (holder.find("\"Id\":") + 1) // If an object does not have a temperature, it skips the next few items because they don't exist either
 		{
-			temp.isAsteroid = true;
 			temp.temp = 0;
 			temp.greenhouse = 0;
 			temp.surfacePressure = 0;
@@ -684,11 +735,6 @@ void GetData(std::ifstream& inputFile)
 		holder.erase(0, 13);
 		temp.luminosity = std::stod(holder, &sz);
 		temp.luminosity = (temp.luminosity / (3.827 * pow(10, 26))); // converts watts to solar lum
-
-		// determine if it is a star
-		while (inputFile >> holder && !(holder.find("\"StarType\":") + 1));
-		holder.erase(0, 11);
-		temp.isStar = std::stoi(holder, &sz);
 
 		// find molten level
 		while (inputFile >> holder && !(holder.find("\"MoltenLevel\":") + 1));
@@ -733,11 +779,23 @@ void GetData(std::ifstream& inputFile)
 		}
 	NoTemperature:;
 
-		// find mass
+		// find mass, isStar, type, shape
 		while (inputFile >> holder && !(holder.find("\"Mass\":") + 1));
 		holder.erase(0, 7);
 		temp.mass = std::stod(holder, &sz);
 		//temp.mass = (temp.mass / (5.9736 * pow(10, 24))); // converts kg to earth masses
+        if (temp.mass > STARCUTOFF)
+        {
+            temp.isStar = true;
+            temp.type = "Star";
+        }
+        else
+        {
+            temp.isStar = false;
+            temp.type = ""; // will be dealt with after hierarchy is found
+        }
+        temp.isRound = temp.mass > HYDRCUTOFF;
+        // in reality hydrostatic equilibrium is determined by shape, but SU2 doesn't seem to store this information
 
 		// find radius
 		while (inputFile >> holder && !(holder.find("\"Radius\":") + 1));
@@ -745,27 +803,33 @@ void GetData(std::ifstream& inputFile)
 		temp.radius = std::stod(holder, &sz);
 		temp.radius /= 1000; // m to km
 
-		std::string y, z;
-		/*
+		std::string x, y, z;
+
 		// find orientation and add x y z to vector
 		while (inputFile >> holder && !(holder.find("\"Orientation\":") + 1));
 		holder.erase(0, 15);
+		x = holder.substr(holder.find(";"));
+		x.erase(0, 1);
+		y = x.substr(x.find(";"));
+		y.erase(0, 1);
+		z = y.substr(y.find(";"));
+		z.erase(0, 1);
+		temp.orientation.w = std::stod(holder, &sz); // quaternion element r
+		temp.orientation.x = std::stod(x, &sz); // quaternion element i
+		temp.orientation.y = std::stod(y, &sz); // quaternion element j
+		temp.orientation.z = std::stod(z, &sz); // quaternion element k
+
+		// finds angular velocity
+		while (inputFile >> holder && !(holder.find("\"AngularVelocity\":") + 1));
+		holder.erase(0, 19);
 		y = holder.substr(holder.find(";"));
 		y.erase(0, 1);
 		z = y.substr(y.find(";"));
 		z.erase(0, 1);
-		temp.orientation.x = std::stod(holder, &sz); // x
-		temp.orientation.y = std::stod(y, &sz); // y
-		temp.orientation.z = std::stod(z, &sz); // z
-		// still one value left
-		*/
-
-		// finds angular velocity
-		temp.angularVelocity.x = 0.0;
-		temp.angularVelocity.z = 0.0;
-		while (inputFile >> holder && !(holder.find("\"AngularVelocity\":") + 1));
-		holder.erase(0, 21);
-		temp.rotationPeriod = temp.angularVelocity.y = std::stod(holder, &sz); // gets angular velocity
+		temp.angularVelocity.x = std::stod(holder, &sz); // x
+		temp.angularVelocity.y = std::stod(y, &sz); // y
+		temp.angularVelocity.z = std::stod(z, &sz); // z
+		temp.rotationPeriod = temp.angularVelocity.magnitude();
 		temp.rotationPeriod = ((2 * PI) / abs(temp.rotationPeriod)); // calculates rot period
 		temp.rotationPeriod /= 3600; // sec to hours
 
@@ -791,78 +855,103 @@ void GetData(std::ifstream& inputFile)
 		temp.velocity.y = std::stod(y, &sz); // y
 		temp.velocity.z = std::stod(z, &sz); // z
 
-		// find category / type
+		// find category
 		while (inputFile >> holder && !(holder.find("\"Category\":") + 1));
 		holder.erase(0, 12);
 		holder.erase(holder.size() - 1, 1);
-		temp.type = holder;
+		temp.class_ = holder;
 
-		// uses category to determine what kind of object this is
-		if (temp.isStar == true || temp.type == "star")
-		{
-			temp.type = "Star";
-			temp.class_ = "";
-		}
-		else if (temp.type == "planet")
-		{
-			temp.type = "Planet";
-			if (temp.hydrogenMass / temp.mass > 0.01)
-			{
-				if (temp.waterMass / temp.mass > 0.3)
-					temp.class_ = "Neptune";
-				else
-					temp.class_ = "Jupiter";
-			}
-			else
-			{
-				if (temp.waterMass / temp.mass > 0.05)
-					temp.class_ = "Aquaria";
-				else if (temp.ironMass / temp.mass > 0.3)
-					temp.class_ = "Ferria";
-				else
-					temp.class_ = "Terra";
-			}
-		}
-		else if (temp.type == "moon")
-		{
-			if (temp.radius > 200)
-				temp.type = "Moon";
-			else
-				temp.type = "DwarfMoon";
-
-			if (temp.waterMass / temp.mass > 0.05)
-				temp.class_ = "Aquaria";
-			else if (temp.ironMass / temp.mass > 0.3)
-				temp.class_ = "Ferria";
-			else
-				temp.class_ = "Terra";
-		}
-		else if (temp.type == "sso")
-		{
-			if (temp.isAsteroid || temp.radius < 300)
-			{
-				temp.type = "Asteroid";
-				temp.class_ = "Asteroid";
-			}
-			else
-			{
-				temp.type = "DwarfPlanet";
-
-				if (temp.waterMass / temp.mass > 0.05)
-					temp.class_ = "Aquaria";
-				else if (temp.ironMass / temp.mass > 0.3)
-					temp.class_ = "Ferria";
-				else
-					temp.class_ = "Terra";
-			}
-		}
-		else if (temp.type == "blackhole")
-		{
-			temp.type = "Star";
-			temp.class_ = "X";
-		}
-
-		// adds object to global vector
-		object.push_back(temp);
+		// add object to global vector, ignoring US2 barycenters (which have R=1m, M=1kg) and nameless fragments
+		if (temp.name != "" && temp.radius != 0.001)
+            object.push_back(temp);
 	}
+}
+
+/*
+
+The reason this is needed is because Universe Sandbox 2 doesn't update the status of its bodies based on orbital relationships.
+You can put an Earth around Jupiter, change some stats, but Earth is still considered a planet, not a moon.
+You can even blow stuff off a star until it's an asteroid, but its core fragment is still registered as a star.
+So this function is here to re-evaluate each bodies according to their orbital relationships and mass, as used by SE.
+
+*/
+
+void Typifier(Object& obj)
+{
+    if (&obj == root || (obj.partner != obj.parent && (obj.parent == root && obj.mass > obj.partner->mass)))
+    {
+        obj.type = "Star"; // even an asteroid-size planemo is considered a "star" by SE
+        return;
+    }
+
+    if (obj.isStar)
+        return;
+    else if (obj.partner->isStar)
+    {
+        if (ClearanceCheck(obj))
+            obj.type = "Planet";
+        else if (obj.isRound)
+            obj.type = "DwarfPlanet";
+        else
+            // mean comet eccentricity is 0.7, while most e=0.4 SSSO's are comets or asteroids of comet origins
+            obj.type = (obj.eccentricity > 0.4) ? "Comet" : "Asteroid";
+    }
+    else if (obj.partner->isRound) // there's no separate type for Moon-moons in SE (yet)
+    {
+        if (obj.isRound)
+            if (obj.mass < obj.partner->mass)
+                obj.type = "Moon";
+            else
+                obj.type = ClearanceCheck(obj) ? "Planet" : "DwarfPlanet";
+        else
+            obj.type = "DwarfMoon";
+    }
+    else // incl. binary comet or asteroid
+        obj.type = (obj.eccentricity > 0.4) ? "Comet" : "Asteroid";
+}
+
+bool ClearanceCheck(Object& obj)
+{
+    if (obj.parent->parent == root)
+        return true;
+    // Pi discriminant for orbital clearance (a mass range of 10e23 can be used instead,
+    // which would make 4 solar system moons dwarf planets if they weren't moons)
+    if (obj.partner != obj.parent) // orbits own barycenter
+    {
+        return (K_KGKGAU * (obj.mass / (pow(obj.parent->parent->mass, 5.0/2.0) * pow(obj.parent->semimajor, 9.0/8.0))) > 1);
+    }
+    else
+        return (K_KGKGAU * (obj.mass / (pow(obj.parent->mass, 5.0/2.0) * pow(obj.semimajor, 9.0/8.0))) > 1);
+}
+
+// don't think a classifier is necessary because SE seems to be able to make sense of it on its own
+
+void Classifier(Object& obj)
+{
+    if (obj.type == "Star")
+    {
+        if (obj.class_ == "blackhole")
+            obj.class_ = "X";
+		else
+            obj.class_ = "";
+    }
+    else
+    {
+        if (obj.hydrogenMass / obj.mass > 0.01)
+        {
+            if (obj.waterMass / obj.mass > 0.3)
+                obj.class_ = "Neptune";
+            else
+                obj.class_ = "Jupiter";
+        }
+        else
+        {
+            if (obj.waterMass / obj.mass > 0.05)
+                obj.class_ = "Aquaria";
+            else if (obj.ironMass / obj.mass > 0.3)
+                obj.class_ = "Ferria";
+            else
+                obj.class_ = "Terra";
+        }
+    }
 }
