@@ -1,29 +1,3 @@
-/*
-
-Fixed since last version:
-
-Changed the way type is identified, reasons:
-1. half of the objects were the wrong type because SU2 doesn't update types of objects you modify
-2. type now follows hierarchy and astronomical definitions, such as clearing orbits
-3. dwarf planets are identified correctly, dwarf moons based on mass cutoff
-4. will be easy to add support for planemo and moonmoon types if those are added to SE
-Separated class identification to its own function for brevity
-Removed some old unneeded code
-Nameless fragments are now skipped by input function
-Recursive barycenters fixed (again...)
-
-Remaining Bugs:
-
-Obliquity is still 100% broken
-Some binary math still seems wrong
-Trojans result in bad math (first time I tested a system with large trojans)
-Class identification could be better... classes in output files are often more accurate if (now separate) "classifier" function is disabled
-
-Edit: fixed an issue itroduced by trying to fix trojans and some other small bugs+cleanup
-Edit 2: tried to solve obliquity - not working still
-
-*/
-
 #include <string>
 #include <iostream>
 #include <fstream>
@@ -128,6 +102,7 @@ double Determinate(std::vector<double>&);
 StateVect Subtract(StateVect&, StateVect&);
 StateVect Add(StateVect&, StateVect&);
 StateVect Normalize(StateVect&);
+StateVect RotateVector(Quaternion&, StateVect&);
 EulerAngles QuaternionToEuler(Quaternion&);
 
 int main()
@@ -474,14 +449,22 @@ void CalcOrbit(Object& obj)
 	else
 		obj.argOfPeriapsis = ((2 * PI) - acos(DotProduct(n, eccentVect) / (n.magnitude() * eccentVect.magnitude())));
 
-    EulerAngles angles = QuaternionToEuler(obj.orientation);
+    StateVect tiltVect = RotateVector(obj.orientation, obj.angularVelocity);
 
-/*
+    // Calculates Obliquity
+	obj.obliquity = acos( DotProduct(tiltVect, momentVect) / (tiltVect.magnitude() * momentVect.magnitude()) );
+	obj.obliquity = abs(180 - ((obj.obliquity * (180 / PI))));
+	//obj.obliquity -= 90; // convert to equator
+
+
+/*    EulerAngles angles = QuaternionToEuler(obj.orientation);
+
+
 In proper Euler angles:
 1st is precession (arg. of obliquity)
 2nd is axial tilt / obliquity
 3rd is rotation ("yaw" in US2)
-*/
+
 	angles.pitch = angles.pitch * (180 / PI);
     angles.roll = angles.roll * (180 / PI);
 	if (angles.yaw >= 0.0)
@@ -491,8 +474,9 @@ In proper Euler angles:
 
 
     obj.obliquity = angles.pitch + obj.inclination; // relative to orbital plane
-// still wrong!!!
-// std::cout << "\n" << obj.name << "  obl:  " << obj.obliquity << "  arg:  " << angles.roll << "  yaw:  " << angles.yaw << "\n";
+*/
+std::cout << "\n" << obj.name << "  obl:  " << obj.obliquity << "\n";
+//"  arg:  " << angles.roll << "  yaw:  " << angles.yaw << "\n";
 
 /*
 	StateVect left, forward, parentTemp;
@@ -521,6 +505,26 @@ In proper Euler angles:
 	return;
 }
 
+// rotate vector based on a quaternion's rotation matrix
+StateVect RotateVector(Quaternion& q, StateVect& vect)
+{
+    StateVect result;
+
+    result.x = vect.x * (q.w * q.w + q.x * q.x - q.y * q.y - q.z * q.z);
+    result.x += vect.y * (2 * q.x * q.y - 2 * q.w * q.z);
+    result.x += vect.z * (2 * q.x * q.z + 2 * q.w * q.y);
+
+    result.y = vect.x * (2 * q.x * q.y + 2 * q.w * q.z);
+    result.y += vect.y * (q.w * q.w - q.x * q.x + q.y * q.y - q.z * q.z);
+    result.y += vect.z * (2 * q.y * q.z - 2 * q.w * q.x);
+
+    result.z = vect.x * (2 * q.x * q.z - 2 * q.w * q.y);
+    result.z += vect.y * (2 * q.y * q.z + 2 * q.w * q.x);
+    result.z += vect.z * (q.w * q.w - q.x * q.x - q.y * q.y + q.z * q.z);
+
+    return result;
+}
+
 /*
 // from Wikipedia (Tait–Bryan angles)
 EulerAngles QuaternionToEuler(Quaternion& q)
@@ -545,7 +549,7 @@ EulerAngles QuaternionToEuler(Quaternion& q)
 
     return angles;
 }
-*/
+
 
 // Proper Euler angles ZXZ
 EulerAngles QuaternionToEuler(Quaternion& q)
@@ -568,7 +572,7 @@ EulerAngles QuaternionToEuler(Quaternion& q)
 
     return angles;
 }
-
+*/
 void CalcMoreOrbit(Object& obj)
 {
 
