@@ -126,12 +126,11 @@ int main()
             while (inputFile >> holder && holder != "},");
             std::getline(inputFile, holder);
             std::getline(inputFile, holder);
-            systemName = holder;
-            systemName.erase(0, 8);
-            systemName.erase(systemName.size() - 2, 2);
-            if (systemName == "Empty Universe")
+            holder.erase(0, 8);
+            holder.erase(holder.size() - 2, 2);
+            if (holder != "Empty Universe")
                 // use file name if the simulation is unnamed
-                systemName = entry->d_name;
+                systemName = holder;
             planetFileName = starFileName = systemName;
             starFileName = "output/" + starFileName + " Star.sc";
             planetFileName = "output/" + planetFileName + " Planet.sc";
