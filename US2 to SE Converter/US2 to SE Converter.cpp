@@ -86,7 +86,7 @@ const double PI = 3.1415926535; // it's pi you idiot
 void GetData(std::ifstream&);
 void PrintFile(std::ofstream&, Object&);
 void Bond(std::list<Object>&, std::list<Object>::iterator&, Object&, Object&);
-void CreateBinary(std::list<Object>&, Object&, Object&);
+void UpdateBinary(Object&, Object&, Object&);
 void Typifier(Object&);
 void Classifier(Object&);
 
@@ -149,7 +149,7 @@ int main()
 	int size = object.size();
 	// sort by descending mass
 	std::sort(object.begin(), object.end(), [](Object const& one, Object const& two){ return ( one.mass > two.mass ); } );
-
+    // build hierarchy
     if (size>1)
     {
         for (int i = 0; i < size; i++)
@@ -272,15 +272,19 @@ void Bond(std::list<Object>& binary, std::list<Object>::iterator& b, Object& dom
     // whether bonding is direct or requires a barycenter
     if (dom.type == "Star" && sub.type == "Star" || (sub.mass / dom.mass) > 0.01)
     {
-        // always heavier object first
-        CreateBinary(binary, dom, sub);
-        dom.partner = &sub;
-        sub.partner = &dom;
+        // create barycenter with heavier object first
+        Object temp;
+        temp.type = "Barycenter";
+        temp.parent = dom.parent;
+        temp.partner = dom.partner;
+        temp.child.push_back(&dom);
+        temp.child.push_back(&sub);
+        binary.push_back(temp);
         b++;
+       	UpdateBinary(*b, dom, sub);
 
-        if (dom.parent != NULL)
+        if (dom.parent != NULL || sub.parent != NULL)
         {
-            b->parent = dom.parent;
             for (int i=0; i < b->parent->child.size(); i++)
             {
                 if (b->parent->child.at(i) == &dom || b->parent->child.at(i) == &sub)
@@ -288,6 +292,9 @@ void Bond(std::list<Object>& binary, std::list<Object>::iterator& b, Object& dom
             }
             b->parent->child.push_back(&*b);
         }
+
+        dom.partner = &sub;
+        sub.partner = &dom;
         dom.parent = sub.parent = &*b;
     }
     else
@@ -297,35 +304,32 @@ void Bond(std::list<Object>& binary, std::list<Object>::iterator& b, Object& dom
     }
 }
 
-void CreateBinary(std::list<Object>& binaryList, Object& A, Object& B)
+// binaries of binaries have to be corrected when hierarchy changes
+void UpdateBinary(Object& bin, Object& A, Object& B)
 {
-	Object temp;
+    bin.mass = A.mass + B.mass;
+    bin.name = A.mass > B.mass ? (A.name + "-" + B.name) : (B.name + "-" + A.name);
     // a barycenter is "stellar" if one of its components is a star
-    temp.isStar = A.isStar && B.isStar;
-	temp.name = (A.name + "-" + B.name);
-	temp.type = "Barycenter";
-	temp.mass = A.mass + B.mass;
-	temp.parent = A.parent;
-    temp.partner = A.partner;
-	// This essentially finds the average of the weighted vectors to determine the position of the barycenter
-	double AposRatio = A.mass / temp.mass,
-		BposRatio = B.mass / temp.mass;
-	StateVect AposScaled = Scale(AposRatio, A.position),
-		BposScaled = Scale(BposRatio, B.position);
-	temp.position = Add(AposScaled, BposScaled);
+    bin.isStar = A.isStar || B.isStar;
+    // This essentially finds the average of the weighted vectors to determine the position of the barycenter
+    double AposRatio = A.mass / bin.mass,
+        BposRatio = B.mass / bin.mass;
+    StateVect AposScaled = Scale(AposRatio, A.position),
+        BposScaled = Scale(BposRatio, B.position);
+    bin.position = Add(AposScaled, BposScaled);
 
-	// this also averages the velocity vectors, weighted based on distance from barycenter, to find the velocity of the barycenter
-	double distTotal = Distance(A, B),
-		AvelRatio = (Distance(B, temp) / distTotal),
-		BvelRatio = (Distance(A, temp) / distTotal);
-	StateVect AvelScaled = Scale(AvelRatio, A.velocity),
-		BvelScaled = Scale(BvelRatio, B.velocity);
-	temp.velocity = Add(AvelScaled, BvelScaled);
+    // this also averages the velocity vectors, weighted based on distance from barycenter, to find the velocity of the barycenter
+    double distTotal = Distance(A, B),
+        AvelRatio = (Distance(B, bin) / distTotal),
+        BvelRatio = (Distance(A, bin) / distTotal);
+    StateVect AvelScaled = Scale(AvelRatio, A.velocity),
+        BvelScaled = Scale(BvelRatio, B.velocity);
+    bin.velocity = Add(AvelScaled, BvelScaled);
 
-	temp.child.push_back(&A);
-	temp.child.push_back(&B);
-	//temp.mass = 5.75e18;
-	binaryList.push_back(temp);
+    // should bin.tilt and bin.angularVelocity be calculated for use in orbits of children?
+
+    if (bin.parent != NULL && bin.parent->type == "Barycenter")
+        UpdateBinary(*bin.parent, bin, *bin.partner);
 }
 
 void PrintFile(std::ofstream& f, Object & o)
