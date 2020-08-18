@@ -4,7 +4,7 @@
 #include <vector>
 #include <list>
 #include <math.h>
-
+#include <dirent.h>
 #include <algorithm> // for sort()
 #include <limits> // for max double
 
@@ -44,11 +44,6 @@ public:
 
 struct Quaternion {
     double w, x, y, z;
-};
-
-struct EulerAngles {
-    // argument of obliquity, obliquity, yaw
-    double roll, pitch, yaw;
 };
 
 struct Object
@@ -103,137 +98,160 @@ StateVect Subtract(StateVect&, StateVect&);
 StateVect Add(StateVect&, StateVect&);
 StateVect Normalize(StateVect&);
 StateVect RotateVector(Quaternion&, StateVect&);
-EulerAngles QuaternionToEuler(Quaternion&);
 
 int main()
 {
 	std::string systemName, starFileName, planetFileName, holder;
 
-	std::ifstream inputFile("input/simulation.json");
-	if (!inputFile)
-	{
-		std::cout << "\nThere was an error opening the simulation file! Make sure it is placed in the \"input\" folder!\n";
-		return 0;
-	}
-
-	// finds the "Name": part of the simulation file and uses it for star and planet .sc files
-	while (inputFile >> holder && holder != "},");
-	while (inputFile >> holder && holder != "},");
-	std::getline(inputFile, holder);
-	std::getline(inputFile, holder);
-	starFileName = holder;
-	starFileName.erase(0, 8);
-	starFileName.erase(starFileName.size() - 2, 2);
-	planetFileName = systemName = starFileName;
-	starFileName = "output/" + starFileName + " Star.sc";
-	planetFileName = "output/" + planetFileName + " Planet.sc";
-
-	// finds gravitational constant
-	while (inputFile >> holder && !(holder.find("\"Gravity\":") + 1));
-	holder.erase(0, 10);
-	G = std::stod(holder, &sz);
-
-	// inputs every object into the global vector
-	GetData(inputFile);
-	inputFile.close();
-
-    Object *attractor = NULL, *neighbor = NULL;
-    double force, dist, max_f, min_d;
-
-	std::list<Object> binary;
-	Object systemO;
-	systemO.name = systemName + " System";
-	binary.push_back(systemO);
-	std::list<Object>::iterator b = binary.begin(); // binary object counter
-
-	int size = object.size();
-	// sort by descending mass
-	std::sort(object.begin(), object.end(), [](Object const& one, Object const& two){ return ( one.mass > two.mass ); } );
-    // build hierarchy
-    if (size>1)
+    DIR *dir = opendir ("input/");
+    struct dirent *entry;
+    if (dir)
     {
-        for (int i = 0; i < size; i++)
+        // find all files in input
+        while ((entry = readdir (dir)) != NULL)
         {
-            max_f = 0.0;
-            min_d = std::numeric_limits<double>::max();
-            for (int j = 0; j < size; j++)
+            // open files with .json extension
+            systemName = entry->d_name;
+            if (systemName.find(".json", (systemName.length() - 5)) == std::string::npos)
+                continue;
+            std::ifstream inputFile("input/" + systemName);
+            if (!inputFile)
             {
-                if (i==j) continue;
-                // identify strongest attractor
-                force = object.at(j).mass / pow(Distance(object.at(i), object.at(j)), 2); // G, m constants
-                if (max_f < force && (i==0 || object.at(i).mass < object.at(j).mass))
+                std::cout << "\nThere was an error opening a simulation file! Make sure it is placed in the \"input\" folder!\n";
+                continue;
+            }
+
+            // finds the "Name": part of the simulation file and uses it for star and planet .sc files
+            while (inputFile >> holder && holder != "},");
+            while (inputFile >> holder && holder != "},");
+            std::getline(inputFile, holder);
+            std::getline(inputFile, holder);
+            systemName = holder;
+            systemName.erase(0, 8);
+            systemName.erase(systemName.size() - 2, 2);
+            if (systemName == "Empty Universe")
+                // use file name if the simulation is unnamed
+                systemName = entry->d_name;
+            planetFileName = starFileName = systemName;
+            starFileName = "output/" + starFileName + " Star.sc";
+            planetFileName = "output/" + planetFileName + " Planet.sc";
+
+            // finds gravitational constant
+            while (inputFile >> holder && !(holder.find("\"Gravity\":") + 1));
+            holder.erase(0, 10);
+            G = std::stod(holder, &sz);
+
+            // inputs every object into the global vector
+            GetData(inputFile);
+            inputFile.close();
+
+            Object *attractor = NULL, *neighbor = NULL;
+            double force, dist, max_f, min_d;
+
+            std::list<Object> binary;
+            Object systemO;
+            systemO.name = systemName + " System";
+            binary.push_back(systemO);
+            std::list<Object>::iterator b = binary.begin(); // binary object counter
+
+            int size = object.size();
+            // sort by descending mass
+            std::sort(object.begin(), object.end(), [](Object const& one, Object const& two){ return ( one.mass > two.mass ); } );
+            // build hierarchy
+            if (size>1)
+            {
+                for (int i = 0; i < size; i++)
                 {
-                    max_f = force;
-                    attractor = &object.at(j);
+                    max_f = 0.0;
+                    min_d = std::numeric_limits<double>::max();
+                    for (int j = 0; j < size; j++)
+                    {
+                        if (i==j) continue;
+                        // identify strongest attractor
+                        force = object.at(j).mass / pow(Distance(object.at(i), object.at(j)), 2); // G, m constants
+                        if (max_f < force && (i==0 || object.at(i).mass < object.at(j).mass))
+                        {
+                            max_f = force;
+                            attractor = &object.at(j);
+                        }
+                        // identify closest neighbor
+                        dist = Distance(object.at(i), object.at(j));
+                        if (dist < min_d)
+                        {
+                            min_d = dist;
+                            neighbor = &object.at(j);
+                        }
+                    }
+                    if (attractor == neighbor){ // else { guaranteed: attractor > neighbor }
+
+                        object.at(i).mass > attractor->mass ? Bond(binary, b, object.at(i), *attractor) : Bond(binary, b, *attractor, object.at(i));
+                    }
+                    else if (object.at(i).mass > neighbor->mass && object.at(i).mass > attractor->mass)
+                    {
+                        Bond(binary, b, object.at(i), *attractor);
+                        Distance(*neighbor, object.at(i)) < Distance(*neighbor, *attractor) ? Bond(binary, b, object.at(i), *neighbor) : Bond(binary, b, *attractor, *neighbor);
+                    }
+                    else if (object.at(i).mass < neighbor->mass && object.at(i).mass < attractor->mass)
+                    {
+                        Bond(binary, b, *attractor, *neighbor);
+
+                        neighbor->hillSphereRadius = Distance(*neighbor, *attractor) * (cbrt(neighbor->mass / (3 * attractor->mass)));
+                        dist = Distance(object.at(i), *neighbor);
+                        if (dist < neighbor->hillSphereRadius)
+                            Bond(binary, b, *neighbor, object.at(i));
+                        else // force leftovers to pick a dominant object
+                            Bond(binary, b, *attractor, object.at(i));
+                    }
+                    else // neighbor < obj < attractor
+                    {
+                        Bond(binary, b, *attractor, object.at(i));
+
+                        object.at(i).hillSphereRadius = Distance(object.at(i), *attractor) * (cbrt(object.at(i).mass / (3 * attractor->mass)));
+                        dist = Distance(object.at(i), *neighbor);
+                        if (dist < object.at(i).hillSphereRadius)
+                            Bond(binary, b, object.at(i), *neighbor);
+                    }
                 }
-                // identify closest neighbor
-                dist = Distance(object.at(i), object.at(j));
-                if (dist < min_d)
-                {
-                    min_d = dist;
-                    neighbor = &object.at(j);
-                }
             }
-            if (attractor == neighbor){ // else { guaranteed: attractor > neighbor }
 
-                object.at(i).mass > attractor->mass ? Bond(binary, b, object.at(i), *attractor) : Bond(binary, b, *attractor, object.at(i));
-            }
-            else if (object.at(i).mass > neighbor->mass && object.at(i).mass > attractor->mass)
-            {
-                Bond(binary, b, object.at(i), *attractor);
-                Distance(*neighbor, object.at(i)) < Distance(*neighbor, *attractor) ? Bond(binary, b, object.at(i), *neighbor) : Bond(binary, b, *attractor, *neighbor);
-            }
-            else if (object.at(i).mass < neighbor->mass && object.at(i).mass < attractor->mass)
-            {
-                Bond(binary, b, *attractor, *neighbor);
+            // as long as all objects are connected up the hierarchy, this will find the root
+            root = &object.at(0);
+            while (root->parent != NULL)
+                root = root->parent;
+            root->partner = root->parent = root;
 
-                neighbor->hillSphereRadius = Distance(*neighbor, *attractor) * (cbrt(neighbor->mass / (3 * attractor->mass)));
-                dist = Distance(object.at(i), *neighbor);
-                if (dist < neighbor->hillSphereRadius)
-                    Bond(binary, b, *neighbor, object.at(i));
-                else // force leftovers to pick a dominant object
-                    Bond(binary, b, *attractor, object.at(i));
-            }
-            else // neighbor < obj < attractor
-            {
-                Bond(binary, b, *attractor, object.at(i));
+            // this is where the magic happens
+            CalcOrbit(*root);
+            // requires partners (binaries) to already have some orbit info
+            CalcMoreOrbit(*root);
 
-                object.at(i).hillSphereRadius = Distance(object.at(i), *attractor) * (cbrt(object.at(i).mass / (3 * attractor->mass)));
-                dist = Distance(object.at(i), *neighbor);
-                if (dist < object.at(i).hillSphereRadius)
-                    Bond(binary, b, object.at(i), *neighbor);
+            for (int i = 0; i < size; i++)
+            {
+                Typifier(object.at(i));
+                Classifier(object.at(i));
             }
+
+            std::ofstream starFile(starFileName.c_str());
+            starFile << "StarBarycenter\t\t\"" << binary.begin()->name << "\"\n{}\n";
+            starFile.close();
+
+            root->parent = &*binary.begin();
+            std::ofstream planetFile(planetFileName.c_str());
+            PrintFile(planetFile, *root);
+            planetFile.close();
+
+            object.clear();
         }
+        closedir (dir);
     }
-
-	// as long as all objects are connected up the hierarchy, this will find the root
-	root = &object.at(0);
-	while (root->parent != NULL)
-		root = root->parent;
-    root->partner = root->parent = root;
-
-    // this is where the magic happens
-	CalcOrbit(*root);
-	// requires partners (binaries) to already have some orbit info
-	CalcMoreOrbit(*root);
-
-    for (int i = 0; i < size; i++)
+    else
     {
-        Typifier(object.at(i));
-        Classifier(object.at(i));
+        /* could not open directory */
+        std::cout << "\nThere was an error opening the \"input\" folder!\n";
+        return 0;
     }
 
-	std::ofstream starFile(starFileName.c_str());
-	starFile << "StarBarycenter\t\t\"" << binary.begin()->name << "\"\n{}\n";
-	starFile.close();
-
-	root->parent = &*binary.begin();
-	std::ofstream planetFile(planetFileName.c_str());
-	PrintFile(planetFile, *root);
-
-	std::cout << "\n Conversion complete! Look in the \"output\" folder\n to find your files.\n ";
-
-	planetFile.close();
+    std::cout << "\n Conversion complete! Look in the \"output\" folder\n to find your files.\n ";
 	return 0;
 }
 
@@ -273,7 +291,6 @@ void Bond(std::list<Object>& binary, std::list<Object>::iterator& b, Object& dom
     if (dom.type == "Star" && sub.type == "Star" || (sub.mass / dom.mass) > 0.01)
     {
         // create barycenter with heavier object first
-
         Object temp;
         temp.type = "Barycenter";
         temp.parent = dom.parent;
@@ -369,9 +386,9 @@ void PrintFile(std::ofstream& f, Object & o)
 		f << "\n\tClass\t\t\t\t\"" << o.class_ << "\""
 		<< "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
 		<< "\n\tRadius\t\t\t\t" << o.radius
-		<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod;
+		<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod
+        << "\n\tObliquity:\t\t" << o.obliquity;
 
-	//f << "\n\tObliquity:\t\t" << o.obliquity
 	f << "\n\n\tOrbit"
 		<< "\n\t{"
 		<< "\n\t\tRefPlane\t\t\"Equator\""
@@ -463,44 +480,6 @@ void CalcOrbit(Object& obj)
 	obj.obliquity = abs(180 - ((obj.obliquity * (180 / PI))));
 	//obj.obliquity -= 90; // convert to equator
 
-
-/*    EulerAngles angles = QuaternionToEuler(obj.orientation);
-
-
-In proper Euler angles:
-1st is precession (arg. of obliquity)
-2nd is axial tilt / obliquity
-3rd is rotation ("yaw" in US2)
-
-	angles.pitch = angles.pitch * (180 / PI);
-    angles.roll = angles.roll * (180 / PI);
-	if (angles.yaw >= 0.0)
-		angles.yaw = angles.yaw * (180 / PI);
-	else
-		angles.yaw = ((2 * PI) + angles.yaw) * (180 / PI);
-
-
-    obj.obliquity = angles.pitch + obj.inclination; // relative to orbital plane
-*/
-std::cout << "\n" << obj.name << "  obl:  " << obj.obliquity << "\n";
-//"  arg:  " << angles.roll << "  yaw:  " << angles.yaw << "\n";
-
-/*
-	StateVect left, forward, parentTemp;
-	parentTemp.x = (obj.argOfPeriapsis - obj.parent->position.x);
-	parentTemp.y = (obj.argOfPeriapsis - obj.parent->position.y);
-	parentTemp.z = (obj.argOfPeriapsis - obj.parent->position.z);
-	left = Normalize(parentTemp);Subtract
-	forward = CrossProduct(left, momentVect);
-
-	StateVect rotationAxis, world;
-	rotationAxis = Normalize(obj.angularVelocity);
-	// world =
-	obj.obliquity = (PI - acos(DotProduct(momentVect, world)));
-	// argument of obliquity
-
-*/
-
 	obj.argOfPeriapsis = (obj.argOfPeriapsis * (180 / PI)); // convert to degree
 	obj.argOfPeriapsis -= 90; // convert to equator
 
@@ -532,54 +511,6 @@ StateVect RotateVector(Quaternion& q, StateVect& vect)
     return result;
 }
 
-/*
-// from Wikipedia (Tait–Bryan angles)
-EulerAngles QuaternionToEuler(Quaternion& q)
-{
-    EulerAngles angles;
-    // roll (x-axis rotation)
-    double sinr_cosp = 2 * (q.w * q.x + q.y * q.z);
-    double cosr_cosp = 1 - 2 * (q.x * q.x + q.y * q.y);
-    angles.roll = std::atan2(sinr_cosp, cosr_cosp);
-
-    // pitch (y-axis rotation)
-    double sinp = 2 * (q.w * q.y - q.z * q.x);
-    if (std::abs(sinp) >= 1)
-        angles.pitch = std::copysign(PI / 2, sinp); // use 90 degrees if out of range
-    else
-        angles.pitch = std::asin(sinp);
-
-    // yaw (z-axis rotation)
-    double siny_cosp = 2 * (q.w * q.z + q.x * q.y);
-    double cosy_cosp = 1 - 2 * (q.y * q.y + q.z * q.z);
-    angles.yaw = std::atan2(siny_cosp, cosy_cosp);
-
-    return angles;
-}
-
-
-// Proper Euler angles ZXZ
-EulerAngles QuaternionToEuler(Quaternion& q)
-{
-    EulerAngles angles;
-
-    double sin2 = (q.x * q.x + q.y * q.y);      // sin(beta)^2
-    double cos2 = (q.w * q.w + q.z * q.z);      // cos(beta)^2
-    double s  = atan(q.z / q.w);                // (gamma+alpha)/2
-    double d  = atan2(q.y, q.x);                // (gamma-alpha)/2
-
-    angles.roll = s - d;                        // alpha
-
-    angles.yaw = s + d;                         // gamma
-
-    if (cos2 != 0.0)
-        angles.pitch = 2.0 * atan(sqrt(sin2/cos2));
-    else
-        angles.pitch = (0.5 > sin2) ? 0 : PI;
-
-    return angles;
-}
-*/
 void CalcMoreOrbit(Object& obj)
 {
 
