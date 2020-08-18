@@ -8,9 +8,9 @@
 #include <algorithm> // for sort()
 #include <limits> // for max double
 
-#define STARCUTOFF 3e28 // 2.5*10e28 ~ 13 Jupiter masses is the Brown Dwarf cutoff used by SE
-#define HYDRCUTOFF 2e19 // mass < Mimas of ~2*10e19 is used as cutoff
-#define K_KGKGAU 75.345e52
+#define STARCUTOFF 3e28 // 2.5e28 ~ 13 Jupiter masses is the Brown Dwarf cutoff used by SE
+#define HYDRCUTOFF 2e19 // mass < Mimas of ~2e19 is used as cutoff
+#define K_KGKGAU 7.53445e53
 // In solar-mass, earth-mass & AU units, the PI discriminant constant K = 807.
 // But we use kg, kg, AU instead, so our constant = K*pow(solar-mass, 5.0/2.0)/earth-mass = 7.53445e53
 
@@ -38,11 +38,12 @@ public:
 
 	double magnitude()
 	{
-		return (sqrt(pow(x, 2) + pow(y, 2) + pow(z, 2)));
+		return (sqrt(x * x + y * y + z * z));
 	}
 };
 
-struct Quaternion {
+struct Quaternion
+{
     double w, x, y, z;
 };
 
@@ -79,17 +80,19 @@ double G; // gravitation constant
 const double PI = 3.1415926535; // it's pi you idiot
 
 void GetData(std::ifstream&);
-void PrintFile(std::ofstream&, Object&);
+void BuildHierarchy(std::list<Object>&, std::list<Object>::iterator&);
 void Bond(std::list<Object>&, std::list<Object>::iterator&, Object&, Object&);
-void UpdateBinary(Object&, Object&, Object&);
 void Typifier(Object&);
+bool ClearanceCheck(Object&);
 void Classifier(Object&);
+void PrintFile(std::ofstream&, Object&);
 
 // math functions
-double Distance(Object&, Object&);
+void UpdateBinary(Object&, Object&, Object&);
 void CalcOrbit(Object&);
 void CalcMoreOrbit(Object&);
-bool ClearanceCheck(Object&);
+StateVect RotateVector(Quaternion&, StateVect&);
+double Distance(Object&, Object&);
 StateVect CrossProduct(StateVect&, StateVect&);
 double DotProduct(StateVect&, StateVect&);
 StateVect Scale(double, StateVect&);
@@ -97,27 +100,26 @@ double Determinate(std::vector<double>&);
 StateVect Subtract(StateVect&, StateVect&);
 StateVect Add(StateVect&, StateVect&);
 StateVect Normalize(StateVect&);
-StateVect RotateVector(Quaternion&, StateVect&);
 
 int main()
 {
 	std::string systemName, starFileName, planetFileName, holder;
 
-    DIR *dir = opendir ("input/");
+    DIR *dir = opendir("input/");
     struct dirent *entry;
     if (dir)
     {
         // find all files in input
-        while ((entry = readdir (dir)) != NULL)
+        while ((entry = readdir(dir)) != NULL)
         {
             // open files with .json extension
             systemName = entry->d_name;
-            if (systemName.find(".json", (systemName.length() - 5)) == std::string::npos)
+            if (systemName.find(".json", systemName.size() - 5) == std::string::npos)
                 continue;
             std::ifstream inputFile("input/" + systemName);
             if (!inputFile)
             {
-                std::cout << "\nThere was an error opening a simulation file! Make sure it is placed in the \"input\" folder!\n";
+                std::cout << "\nThere was an error opening a simulation file!\n";
                 continue;
             }
 
@@ -128,9 +130,9 @@ int main()
             std::getline(inputFile, holder);
             holder.erase(0, 8);
             holder.erase(holder.size() - 2, 2);
-            if (holder != "Empty Universe")
-                // use file name if the simulation is unnamed
-                systemName = holder;
+            // use file name if the simulation is unnamed
+            if (holder != "Empty Universe") systemName = holder;
+            else systemName.erase(systemName.size() - 5, 5);
             planetFileName = starFileName = systemName;
             starFileName = "output/" + starFileName + " Star.sc";
             planetFileName = "output/" + planetFileName + " Planet.sc";
@@ -144,87 +146,20 @@ int main()
             GetData(inputFile);
             inputFile.close();
 
-            Object *attractor = NULL, *neighbor = NULL;
-            double force, dist, max_f, min_d;
-
             std::list<Object> binary;
             Object systemO;
             systemO.name = systemName + " System";
             binary.push_back(systemO);
             std::list<Object>::iterator b = binary.begin(); // binary object counter
 
-            int size = object.size();
-            // sort by descending mass
-            std::sort(object.begin(), object.end(), [](Object const& one, Object const& two){ return ( one.mass > two.mass ); } );
-            // build hierarchy
-            if (size>1)
-            {
-                for (int i = 0; i < size; i++)
-                {
-                    max_f = 0.0;
-                    min_d = std::numeric_limits<double>::max();
-                    for (int j = 0; j < size; j++)
-                    {
-                        if (i==j) continue;
-                        // identify strongest attractor
-                        force = object.at(j).mass / pow(Distance(object.at(i), object.at(j)), 2); // G, m constants
-                        if (max_f < force && (i==0 || object.at(i).mass < object.at(j).mass))
-                        {
-                            max_f = force;
-                            attractor = &object.at(j);
-                        }
-                        // identify closest neighbor
-                        dist = Distance(object.at(i), object.at(j));
-                        if (dist < min_d)
-                        {
-                            min_d = dist;
-                            neighbor = &object.at(j);
-                        }
-                    }
-                    if (attractor == neighbor){ // else { guaranteed: attractor > neighbor }
-
-                        object.at(i).mass > attractor->mass ? Bond(binary, b, object.at(i), *attractor) : Bond(binary, b, *attractor, object.at(i));
-                    }
-                    else if (object.at(i).mass > neighbor->mass && object.at(i).mass > attractor->mass)
-                    {
-                        Bond(binary, b, object.at(i), *attractor);
-                        Distance(*neighbor, object.at(i)) < Distance(*neighbor, *attractor) ? Bond(binary, b, object.at(i), *neighbor) : Bond(binary, b, *attractor, *neighbor);
-                    }
-                    else if (object.at(i).mass < neighbor->mass && object.at(i).mass < attractor->mass)
-                    {
-                        Bond(binary, b, *attractor, *neighbor);
-
-                        neighbor->hillSphereRadius = Distance(*neighbor, *attractor) * (cbrt(neighbor->mass / (3 * attractor->mass)));
-                        dist = Distance(object.at(i), *neighbor);
-                        if (dist < neighbor->hillSphereRadius)
-                            Bond(binary, b, *neighbor, object.at(i));
-                        else // force leftovers to pick a dominant object
-                            Bond(binary, b, *attractor, object.at(i));
-                    }
-                    else // neighbor < obj < attractor
-                    {
-                        Bond(binary, b, *attractor, object.at(i));
-
-                        object.at(i).hillSphereRadius = Distance(object.at(i), *attractor) * (cbrt(object.at(i).mass / (3 * attractor->mass)));
-                        dist = Distance(object.at(i), *neighbor);
-                        if (dist < object.at(i).hillSphereRadius)
-                            Bond(binary, b, object.at(i), *neighbor);
-                    }
-                }
-            }
-
-            // as long as all objects are connected up the hierarchy, this will find the root
-            root = &object.at(0);
-            while (root->parent != NULL)
-                root = root->parent;
-            root->partner = root->parent = root;
-
             // this is where the magic happens
+            BuildHierarchy(binary, b);
+            // this is where the magic happens #2
             CalcOrbit(*root);
-            // requires partners (binaries) to already have some orbit info
+            // more magic requires binaries to already have some orbit info
             CalcMoreOrbit(*root);
 
-            for (int i = 0; i < size; i++)
+            for (int i = 0; i < object.size(); i++)
             {
                 Typifier(object.at(i));
                 Classifier(object.at(i));
@@ -241,17 +176,89 @@ int main()
 
             object.clear();
         }
-        closedir (dir);
+        closedir(dir);
     }
     else
     {
-        /* could not open directory */
-        std::cout << "\nThere was an error opening the \"input\" folder!\n";
+        // could not open directory
+        std::cout << "\nThere was an error opening the \"input\" folder! Make sure it exists!\n";
         return 0;
     }
 
     std::cout << "\n Conversion complete! Look in the \"output\" folder\n to find your files.\n ";
 	return 0;
+}
+
+void BuildHierarchy(std::list<Object>& binary, std::list<Object>::iterator& b)
+{
+    int size = object.size();
+    double force, dist, max_f, min_d;
+    Object *attractor = NULL, *neighbor = NULL;
+
+    // sort by descending mass
+    std::sort(object.begin(), object.end(), [](Object const& one, Object const& two){ return ( one.mass > two.mass ); } );
+
+    if (size>1)
+    {
+        for (int i = 0; i < size; i++)
+        {
+            max_f = 0.0;
+            min_d = std::numeric_limits<double>::max();
+            for (int j = 0; j < size; j++)
+            {
+                if (i==j) continue;
+                // identify strongest attractor
+                force = object.at(j).mass / pow(Distance(object.at(i), object.at(j)), 2); // G, m constants
+                if (max_f < force && (i==0 || object.at(i).mass < object.at(j).mass))
+                {
+                    max_f = force;
+                    attractor = &object.at(j);
+                }
+                // identify closest neighbor
+                dist = Distance(object.at(i), object.at(j));
+                if (dist < min_d)
+                {
+                    min_d = dist;
+                    neighbor = &object.at(j);
+                }
+            }
+            if (attractor == neighbor){ // else { guaranteed: attractor > neighbor }
+
+                object.at(i).mass > attractor->mass ? Bond(binary, b, object.at(i), *attractor) : Bond(binary, b, *attractor, object.at(i));
+            }
+            else if (object.at(i).mass > neighbor->mass && object.at(i).mass > attractor->mass)
+            {
+                Bond(binary, b, object.at(i), *attractor);
+                Distance(*neighbor, object.at(i)) < Distance(*neighbor, *attractor) ? Bond(binary, b, object.at(i), *neighbor) : Bond(binary, b, *attractor, *neighbor);
+            }
+            else if (object.at(i).mass < neighbor->mass && object.at(i).mass < attractor->mass)
+            {
+                Bond(binary, b, *attractor, *neighbor);
+
+                neighbor->hillSphereRadius = Distance(*neighbor, *attractor) * (cbrt(neighbor->mass / (3 * attractor->mass)));
+                dist = Distance(object.at(i), *neighbor);
+                if (dist < neighbor->hillSphereRadius)
+                    Bond(binary, b, *neighbor, object.at(i));
+                else // force leftovers to pick a dominant object
+                    Bond(binary, b, *attractor, object.at(i));
+            }
+            else // neighbor < obj < attractor
+            {
+                Bond(binary, b, *attractor, object.at(i));
+
+                object.at(i).hillSphereRadius = Distance(object.at(i), *attractor) * (cbrt(object.at(i).mass / (3 * attractor->mass)));
+                dist = Distance(object.at(i), *neighbor);
+                if (dist < object.at(i).hillSphereRadius)
+                    Bond(binary, b, object.at(i), *neighbor);
+            }
+        }
+    }
+
+    // as long as all objects are connected up the hierarchy, this will find the root
+    root = &object.at(0);
+    while (root->parent != NULL)
+        root = root->parent;
+    root->partner = root->parent = root;
 }
 
 void Bond(std::list<Object>& binary, std::list<Object>::iterator& b, Object& dom, Object& sub)
@@ -351,72 +358,8 @@ void UpdateBinary(Object& bin, Object& A, Object& B)
         UpdateBinary(*bin.parent, bin, *bin.partner);
 }
 
-void PrintFile(std::ofstream& f, Object & o)
-{
-
-	f << o.type << "\t\t\t\t\t\"" << o.name << "\""
-		<< "\n{";
-	if (&o == root && o.type == "Barycenter")
-	{
-		f << "\n\tParentBody\t\t\t\"" << o.parent->name << "\""
-			<< "\n}\n\n";
-		for (int i = 0; i < o.child.size(); i++)
-			PrintFile(f, *o.child.at(i));
-		return;
-	}
-	else if (&o == root && o.type == "Star")
-	{
-		f << "\n\tParentBody\t\t\t\"" << o.parent->name << "\""
-			<< "\n\tLum\t\t\t\t\t" << o.luminosity
-			<< "\n\tTeff\t\t\t\t" << o.temp
-			<< "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
-			<< "\n\tRadius\t\t\t\t" << o.radius
-			<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod
-            //<< "\n\tObliquity:\t\t" << o.obliquity
-			<< "\n}\n\n";
-		for (int i = 0; i < o.child.size(); i++)
-			PrintFile(f, *o.child.at(i));
-		return;
-	}
-	else
-		f << "\n\tParentBody\t\t\t\"" << o.parent->name << "\"";
-
-	if (o.type != "Barycenter")
-		f << "\n\tClass\t\t\t\t\"" << o.class_ << "\""
-		<< "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
-		<< "\n\tRadius\t\t\t\t" << o.radius
-		<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod
-        << "\n\tObliquity:\t\t" << o.obliquity;
-
-	f << "\n\n\tOrbit"
-		<< "\n\t{"
-		<< "\n\t\tRefPlane\t\t\"Equator\""
-		<< "\n\t\tSemiMajorAxis\t" << o.semimajor
-		<< "\n\t\tPeriod\t\t\t" << o.period
-		<< "\n\t\tEccentricity\t" << o.eccentricity
-		<< "\n\t\tInclination\t\t" << o.inclination
-		<< "\n\t\tAscendingNode\t" << o.longOfAscNode
-		<< "\n\t\tArgOfPericenter\t" << o.argOfPeriapsis
-		<< "\n\t\tMeanAnomaly\t\t" << o.meanAnomaly
-		<< "\n\t}";
-
-	if (o.type != "Barycenter")
-		f << "\n\n\tAtmosphere"
-		<< "\n\t{"
-		<< "\n\t\tPressure\t\t" << o.surfacePressure
-		<< "\n\t\tGreenhouse\t\t" << o.greenhouse
-		<< "\n\t}";
-
-	f << "\n}\n\n";
-
-	for (int i = 0; i < o.child.size(); i++)
-		PrintFile(f, *o.child.at(i));
-	return;
-}
-
 void CalcOrbit(Object& obj)
 {
-
 	for (int i = 0; i < obj.child.size(); i++)
 		CalcOrbit(*obj.child.at(i));
 
@@ -471,16 +414,13 @@ void CalcOrbit(Object& obj)
 		obj.argOfPeriapsis = (acos(DotProduct(n, eccentVect) / (n.magnitude() * eccentVect.magnitude())));
 	else
 		obj.argOfPeriapsis = ((2 * PI) - acos(DotProduct(n, eccentVect) / (n.magnitude() * eccentVect.magnitude())));
-
-    StateVect tiltVect = RotateVector(obj.orientation, obj.angularVelocity);
-
-    // Calculates Obliquity
-	obj.obliquity = acos( DotProduct(tiltVect, momentVect) / (tiltVect.magnitude() * momentVect.magnitude()) );
-	obj.obliquity = abs(180 - ((obj.obliquity * (180 / PI))));
-	//obj.obliquity -= 90; // convert to equator
-
 	obj.argOfPeriapsis = (obj.argOfPeriapsis * (180 / PI)); // convert to degree
 	obj.argOfPeriapsis -= 90; // convert to equator
+
+    // calculates obliquity
+    StateVect tiltVect = RotateVector(obj.orientation, obj.angularVelocity);
+	obj.obliquity = acos( DotProduct(tiltVect, momentVect) / (tiltVect.magnitude() * momentVect.magnitude()) );
+	obj.obliquity = abs(180 - ((obj.obliquity * (180 / PI))));
 
 	// calculate mean anomaly
 	obj.meanAnomaly = (E - (obj.eccentricity * sin(E)));
@@ -490,29 +430,8 @@ void CalcOrbit(Object& obj)
 	return;
 }
 
-// rotate vector based on a quaternion's rotation matrix
-StateVect RotateVector(Quaternion& q, StateVect& vect)
-{
-    StateVect result;
-
-    result.x = vect.x * (q.w * q.w + q.x * q.x - q.y * q.y - q.z * q.z);
-    result.x += vect.y * (2 * q.x * q.y - 2 * q.w * q.z);
-    result.x += vect.z * (2 * q.x * q.z + 2 * q.w * q.y);
-
-    result.y = vect.x * (2 * q.x * q.y + 2 * q.w * q.z);
-    result.y += vect.y * (q.w * q.w - q.x * q.x + q.y * q.y - q.z * q.z);
-    result.y += vect.z * (2 * q.y * q.z - 2 * q.w * q.x);
-
-    result.z = vect.x * (2 * q.x * q.z - 2 * q.w * q.y);
-    result.z += vect.y * (2 * q.y * q.z + 2 * q.w * q.x);
-    result.z += vect.z * (q.w * q.w - q.x * q.x - q.y * q.y + q.z * q.z);
-
-    return result;
-}
-
 void CalcMoreOrbit(Object& obj)
 {
-
 	for (int i = 0; i < obj.child.size(); i++)
 		CalcMoreOrbit(*obj.child.at(i));
 
@@ -538,6 +457,26 @@ void CalcMoreOrbit(Object& obj)
 	//obj.semimajor /= 1000; // converts m to km
 
 	return;
+}
+
+// rotate vector based on a quaternion's rotation matrix
+StateVect RotateVector(Quaternion& q, StateVect& vect)
+{
+    StateVect result;
+
+    result.x = vect.x * (q.w * q.w + q.x * q.x - q.y * q.y - q.z * q.z);
+    result.x += vect.y * (2 * q.x * q.y - 2 * q.w * q.z);
+    result.x += vect.z * (2 * q.x * q.z + 2 * q.w * q.y);
+
+    result.y = vect.x * (2 * q.x * q.y + 2 * q.w * q.z);
+    result.y += vect.y * (q.w * q.w - q.x * q.x + q.y * q.y - q.z * q.z);
+    result.y += vect.z * (2 * q.y * q.z - 2 * q.w * q.x);
+
+    result.z = vect.x * (2 * q.x * q.z - 2 * q.w * q.y);
+    result.z += vect.y * (2 * q.y * q.z + 2 * q.w * q.x);
+    result.z += vect.z * (q.w * q.w - q.x * q.x - q.y * q.y + q.z * q.z);
+
+    return result;
 }
 
 double Distance(Object& A, Object& B)
@@ -676,7 +615,7 @@ void GetData(std::ifstream& inputFile)
 		while (inputFile >> holder && !(holder.find("\"Luminosity\":") + 1));
 		holder.erase(0, 13);
 		temp.luminosity = std::stod(holder, &sz);
-		temp.luminosity = (temp.luminosity / (3.827 * pow(10, 26))); // converts watts to solar lum
+		temp.luminosity /= 3.827e26; // converts watts to solar lum
 
 		// find molten level
 		while (inputFile >> holder && !(holder.find("\"MoltenLevel\":") + 1));
@@ -809,15 +748,7 @@ void GetData(std::ifstream& inputFile)
 	}
 }
 
-/*
-
-The reason this is needed is because Universe Sandbox 2 doesn't update the status of its bodies based on orbital relationships.
-You can put an Earth around Jupiter, change some stats, but Earth is still considered a planet, not a moon.
-You can even blow stuff off a star until it's an asteroid, but its core fragment is still registered as a star.
-So this function is here to re-evaluate each bodies according to their orbital relationships and mass, as used by SE.
-
-*/
-
+// evaluate type according to orbital relationships and mass (as defined by IAU / used by SE)
 void Typifier(Object& obj)
 {
     if (&obj == root || (obj.partner != obj.parent && (obj.parent == root && obj.mass > obj.partner->mass)))
@@ -896,4 +827,66 @@ void Classifier(Object& obj)
                 obj.class_ = "Terra";
         }
     }
+}
+
+void PrintFile(std::ofstream& f, Object & o)
+{
+	f << o.type << "\t\t\t\t\t\"" << o.name << "\""
+		<< "\n{";
+	if (&o == root && o.type == "Barycenter")
+	{
+		f << "\n\tParentBody\t\t\t\"" << o.parent->name << "\""
+			<< "\n}\n\n";
+		for (int i = 0; i < o.child.size(); i++)
+			PrintFile(f, *o.child.at(i));
+		return;
+	}
+	else if (&o == root && o.type == "Star")
+	{
+		f << "\n\tParentBody\t\t\t\"" << o.parent->name << "\""
+			<< "\n\tLum\t\t\t\t\t" << o.luminosity
+			<< "\n\tTeff\t\t\t\t" << o.temp
+			<< "\n\tMass\t\t\t\t" << o.mass / 5.9736e24
+			<< "\n\tRadius\t\t\t\t" << o.radius
+			<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod
+            //<< "\n\tObliquity:\t\t" << o.obliquity
+			<< "\n}\n\n";
+		for (int i = 0; i < o.child.size(); i++)
+			PrintFile(f, *o.child.at(i));
+		return;
+	}
+	else
+		f << "\n\tParentBody\t\t\t\"" << o.parent->name << "\"";
+
+	if (o.type != "Barycenter")
+		f << "\n\tClass\t\t\t\t\"" << o.class_ << "\""
+		<< "\n\tMass\t\t\t\t" << o.mass / 5.9736e24
+		<< "\n\tRadius\t\t\t\t" << o.radius
+		<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod
+        << "\n\tObliquity:\t\t" << o.obliquity;
+
+	f << "\n\n\tOrbit"
+		<< "\n\t{"
+		<< "\n\t\tRefPlane\t\t\"Equator\""
+		<< "\n\t\tSemiMajorAxis\t" << o.semimajor
+		<< "\n\t\tPeriod\t\t\t" << o.period
+		<< "\n\t\tEccentricity\t" << o.eccentricity
+		<< "\n\t\tInclination\t\t" << o.inclination
+		<< "\n\t\tAscendingNode\t" << o.longOfAscNode
+		<< "\n\t\tArgOfPericenter\t" << o.argOfPeriapsis
+		<< "\n\t\tMeanAnomaly\t\t" << o.meanAnomaly
+		<< "\n\t}";
+
+	if (o.type != "Barycenter")
+		f << "\n\n\tAtmosphere"
+		<< "\n\t{"
+		<< "\n\t\tPressure\t\t" << o.surfacePressure
+		<< "\n\t\tGreenhouse\t\t" << o.greenhouse
+		<< "\n\t}";
+
+	f << "\n}\n\n";
+
+	for (int i = 0; i < o.child.size(); i++)
+		PrintFile(f, *o.child.at(i));
+	return;
 }
