@@ -273,6 +273,7 @@ void Bond(std::list<Object>& binary, std::list<Object>::iterator& b, Object& dom
     if (dom.type == "Star" && sub.type == "Star" || (sub.mass / dom.mass) > 0.01)
     {
         // create barycenter with heavier object first
+
         Object temp;
         temp.type = "Barycenter";
         temp.parent = dom.parent;
@@ -281,8 +282,9 @@ void Bond(std::list<Object>& binary, std::list<Object>::iterator& b, Object& dom
         temp.child.push_back(&sub);
         binary.push_back(temp);
         b++;
-       	UpdateBinary(*b, dom, sub);
 
+        if(dom.partner != NULL && dom.partner != dom.parent)
+            dom.partner->partner = &*b;
         if (dom.parent != NULL || sub.parent != NULL)
         {
             for (int i=0; i < b->parent->child.size(); i++)
@@ -296,6 +298,7 @@ void Bond(std::list<Object>& binary, std::list<Object>::iterator& b, Object& dom
         dom.partner = &sub;
         sub.partner = &dom;
         dom.parent = sub.parent = &*b;
+        UpdateBinary(*b, dom, sub);
     }
     else
     {
@@ -328,7 +331,7 @@ void UpdateBinary(Object& bin, Object& A, Object& B)
 
     // should bin.tilt and bin.angularVelocity be calculated for use in orbits of children?
 
-    if (bin.parent != NULL && bin.parent->type == "Barycenter")
+    if (bin.parent != NULL && bin.parent->type == "Barycenter" && bin.partner->partner == &bin)
         UpdateBinary(*bin.parent, bin, *bin.partner);
 }
 
@@ -698,6 +701,7 @@ void GetData(std::ifstream& inputFile)
 	{
 		Object temp;
 		temp.parent = NULL;
+		temp.partner = NULL;
 		temp.isStar = false;
 		temp.ironMass = 0;
 		temp.waterMass = 0;
