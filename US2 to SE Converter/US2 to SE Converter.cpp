@@ -1,42 +1,16 @@
-/*
-
-Fixed since last version:
-
-Changed the way type is identified, reasons:
-1. half of the objects were the wrong type because SU2 doesn't update types of objects you modify
-2. type now follows hierarchy and astronomical definitions, such as clearing orbits
-3. dwarf planets are identified correctly, dwarf moons based on mass cutoff
-4. will be easy to add support for planemo and moonmoon types if those are added to SE
-Separated class identification to its own function for brevity
-Removed some old unneeded code
-Nameless fragments are now skipped by input function
-Recursive barycenters fixed (again...)
-
-Remaining Bugs:
-
-Obliquity is still 100% broken
-Some binary math still seems wrong
-Trojans result in bad math (first time I tested a system with large trojans)
-Class identification could be better... classes in output files are often more accurate if (now separate) "classifier" function is disabled
-
-Edit: fixed an issue itroduced by trying to fix trojans and some other small bugs+cleanup
-Edit 2: tried to solve obliquity - not working still
-
-*/
-
 #include <string>
 #include <iostream>
 #include <fstream>
 #include <vector>
 #include <list>
 #include <math.h>
-
+#include <dirent.h>
 #include <algorithm> // for sort()
 #include <limits> // for max double
 
-#define STARCUTOFF 3e28 // 2.5*10e28 ~ 13 Jupiter masses is the Brown Dwarf cutoff used by SE
-#define HYDRCUTOFF 2e19 // mass < Mimas of ~2*10e19 is used as cutoff
-#define K_KGKGAU 75.345e52
+#define STARCUTOFF 3e28 // 2.5e28 ~ 13 Jupiter masses is the Brown Dwarf cutoff used by SE
+#define HYDRCUTOFF 2e19 // mass < Mimas of ~2e19 is used as cutoff
+#define K_KGKGAU 7.53445e53
 // In solar-mass, earth-mass & AU units, the PI discriminant constant K = 807.
 // But we use kg, kg, AU instead, so our constant = K*pow(solar-mass, 5.0/2.0)/earth-mass = 7.53445e53
 
@@ -64,17 +38,13 @@ public:
 
 	double magnitude()
 	{
-		return (sqrt(pow(x, 2) + pow(y, 2) + pow(z, 2)));
+		return (sqrt(x * x + y * y + z * z));
 	}
 };
 
-struct Quaternion {
+struct Quaternion
+{
     double w, x, y, z;
-};
-
-struct EulerAngles {
-    // argument of obliquity, obliquity, yaw
-    double roll, pitch, yaw;
 };
 
 struct Object
@@ -110,16 +80,18 @@ double G; // gravitation constant
 const double PI = 3.1415926535; // it's pi you idiot
 
 void GetData(std::ifstream&);
-void PrintFile(std::ofstream&, Object&);
+void BuildHierarchy(std::list<Object>&, std::list<Object>::iterator&);
 void Bond(std::list<Object>&, std::list<Object>::iterator&, Object&, Object&);
-void CreateBinary(std::list<Object>&, Object&, Object&);
 void Typifier(Object&);
+bool ClearanceCheck(Object&);
+void PrintFile(std::ofstream&, Object&);
 
 // math functions
-double Distance(Object&, Object&);
+void UpdateBinary(Object&, Object&, Object&);
 void CalcOrbit(Object&);
 void CalcMoreOrbit(Object&);
-bool ClearanceCheck(Object&);
+StateVect RotateVector(Quaternion&, StateVect&);
+double Distance(Object&, Object&);
 StateVect CrossProduct(StateVect&, StateVect&);
 double DotProduct(StateVect&, StateVect&);
 StateVect Scale(double, StateVect&);
@@ -127,52 +99,100 @@ double Determinate(std::vector<double>&);
 StateVect Subtract(StateVect&, StateVect&);
 StateVect Add(StateVect&, StateVect&);
 StateVect Normalize(StateVect&);
-EulerAngles QuaternionToEuler(Quaternion&);
 
 int main()
 {
 	std::string systemName, starFileName, planetFileName, holder;
 
-	std::ifstream inputFile("input/simulation.json");
-	if (!inputFile)
-	{
-		std::cout << "\nThere was an error opening the simulation file! Make sure it is placed in the \"input\" folder!\n";
-		return 0;
-	}
+    DIR *dir = opendir("input/");
+    struct dirent *entry;
+    if (dir)
+    {
+        // find all files in input
+        while ((entry = readdir(dir)) != NULL)
+        {
+            // open files with .json extension
+            systemName = entry->d_name;
+            if (systemName.find(".json", systemName.size() - 5) == std::string::npos)
+                continue;
+            std::ifstream inputFile("input/" + systemName);
+            if (!inputFile)
+            {
+                std::cout << "\nThere was an error opening a simulation file!\n";
+                continue;
+            }
 
-	// finds the "Name": part of the simulation file and uses it for star and planet .sc files
-	while (inputFile >> holder && holder != "},");
-	while (inputFile >> holder && holder != "},");
-	std::getline(inputFile, holder);
-	std::getline(inputFile, holder);
-	starFileName = holder;
-	starFileName.erase(0, 8);
-	starFileName.erase(starFileName.size() - 2, 2);
-	planetFileName = systemName = starFileName;
-	starFileName = "output/" + starFileName + " Star.sc";
-	planetFileName = "output/" + planetFileName + " Planet.sc";
+            // finds the "Name": part of the simulation file and uses it for star and planet .sc files
+            while (inputFile >> holder && holder != "},");
+            while (inputFile >> holder && holder != "},");
+            std::getline(inputFile, holder);
+            std::getline(inputFile, holder);
+            holder.erase(0, 8);
+            holder.erase(holder.size() - 2, 2);
+            // use file name if the simulation is unnamed
+            if (holder != "Empty Universe") systemName = holder;
+            else systemName.erase(systemName.size() - 5, 5);
+            planetFileName = starFileName = systemName;
+            starFileName = "output/" + starFileName + " Star.sc";
+            planetFileName = "output/" + planetFileName + " Planet.sc";
 
-	// finds gravitational constant
-	while (inputFile >> holder && !(holder.find("\"Gravity\":") + 1));
-	holder.erase(0, 10);
-	G = std::stod(holder, &sz);
+            // finds gravitational constant
+            while (inputFile >> holder && !(holder.find("\"Gravity\":") + 1));
+            holder.erase(0, 10);
+            G = std::stod(holder, &sz);
 
-	// inputs every object into the global vector
-	GetData(inputFile);
-	inputFile.close();
+            // inputs every object into the global vector
+            GetData(inputFile);
+            inputFile.close();
 
-    Object *attractor = NULL, *neighbor = NULL;
+            std::list<Object> binary;
+            Object systemO;
+            systemO.name = systemName + " System";
+            binary.push_back(systemO);
+            std::list<Object>::iterator b = binary.begin(); // binary object counter
+
+            // this is where the magic happens
+            BuildHierarchy(binary, b);
+            // this is where the magic happens #2
+            CalcOrbit(*root);
+            // more magic requires binaries to already have some orbit info
+            CalcMoreOrbit(*root);
+
+            for (int i = 0; i < object.size(); i++)
+                Typifier(object.at(i));
+
+            std::ofstream starFile(starFileName.c_str());
+            starFile << "StarBarycenter\t\t\"" << binary.begin()->name << "\"\n{}\n";
+            starFile.close();
+
+            root->parent = &*binary.begin();
+            std::ofstream planetFile(planetFileName.c_str());
+            PrintFile(planetFile, *root);
+            planetFile.close();
+
+            object.clear();
+        }
+        closedir(dir);
+    }
+    else
+    {
+        // could not open directory
+        std::cout << "\nThere was an error opening the \"input\" folder! Make sure it exists!\n";
+        return 0;
+    }
+
+    std::cout << "\n Conversion complete! Look in the \"output\" folder\n to find your files.\n ";
+	return 0;
+}
+
+void BuildHierarchy(std::list<Object>& binary, std::list<Object>::iterator& b)
+{
+    int size = object.size();
     double force, dist, max_f, min_d;
+    Object *attractor = NULL, *neighbor = NULL;
 
-	std::list<Object> binary;
-	Object systemO;
-	systemO.name = systemName + " System";
-	binary.push_back(systemO);
-	std::list<Object>::iterator b = binary.begin(); // binary object counter
-
-	int size = object.size();
-	// sort by descending mass
-	std::sort(object.begin(), object.end(), [](Object const& one, Object const& two){ return ( one.mass > two.mass ); } );
+    // sort by descending mass
+    std::sort(object.begin(), object.end(), [](Object const& one, Object const& two){ return ( one.mass > two.mass ); } );
 
     if (size>1)
     {
@@ -230,32 +250,11 @@ int main()
         }
     }
 
-	// as long as all objects are connected up the hierarchy, this will find the root
-	root = &object.at(0);
-	while (root->parent != NULL)
-		root = root->parent;
+    // as long as all objects are connected up the hierarchy, this will find the root
+    root = &object.at(0);
+    while (root->parent != NULL)
+        root = root->parent;
     root->partner = root->parent = root;
-
-    // this is where the magic happens
-	CalcOrbit(*root);
-	// requires partners (binaries) to already have some orbit info
-	CalcMoreOrbit(*root);
-
-    for (int i = 0; i < size; i++)
-        Typifier(object.at(i));
-
-	std::ofstream starFile(starFileName.c_str());
-	starFile << "StarBarycenter\t\t\"" << binary.begin()->name << "\"\n{}\n";
-	starFile.close();
-
-	root->parent = &*binary.begin();
-	std::ofstream planetFile(planetFileName.c_str());
-	PrintFile(planetFile, *root);
-
-	std::cout << "\n Conversion complete! Look in the \"output\" folder\n to find your files.\n ";
-
-	planetFile.close();
-	return 0;
 }
 
 void Bond(std::list<Object>& binary, std::list<Object>::iterator& b, Object& dom, Object& sub)
@@ -293,15 +292,20 @@ void Bond(std::list<Object>& binary, std::list<Object>::iterator& b, Object& dom
     // whether bonding is direct or requires a barycenter
     if (dom.type == "Star" && sub.type == "Star" || (sub.mass / dom.mass) > 0.01)
     {
-        // always heavier object first
-        CreateBinary(binary, dom, sub);
-        dom.partner = &sub;
-        sub.partner = &dom;
+        // create barycenter with heavier object first
+        Object temp;
+        temp.type = "Barycenter";
+        temp.parent = dom.parent;
+        temp.partner = dom.partner;
+        temp.child.push_back(&dom);
+        temp.child.push_back(&sub);
+        binary.push_back(temp);
         b++;
 
-        if (dom.parent != NULL)
+        if(dom.partner != NULL && dom.partner != dom.parent)
+            dom.partner->partner = &*b;
+        if (dom.parent != NULL || sub.parent != NULL)
         {
-            b->parent = dom.parent;
             for (int i=0; i < b->parent->child.size(); i++)
             {
                 if (b->parent->child.at(i) == &dom || b->parent->child.at(i) == &sub)
@@ -309,7 +313,11 @@ void Bond(std::list<Object>& binary, std::list<Object>::iterator& b, Object& dom
             }
             b->parent->child.push_back(&*b);
         }
+
+        dom.partner = &sub;
+        sub.partner = &dom;
         dom.parent = sub.parent = &*b;
+        UpdateBinary(*b, dom, sub);
     }
     else
     {
@@ -318,107 +326,36 @@ void Bond(std::list<Object>& binary, std::list<Object>::iterator& b, Object& dom
     }
 }
 
-void CreateBinary(std::list<Object>& binaryList, Object& A, Object& B)
+// binaries of binaries have to be corrected when hierarchy changes
+void UpdateBinary(Object& bin, Object& A, Object& B)
 {
-	Object temp;
+    bin.mass = A.mass + B.mass;
+    bin.name = A.mass > B.mass ? (A.name + "-" + B.name) : (B.name + "-" + A.name);
     // a barycenter is "stellar" if one of its components is a star
-    temp.isStar = A.isStar && B.isStar;
-	temp.name = (A.name + "-" + B.name);
-	temp.type = "Barycenter";
-	temp.mass = A.mass + B.mass;
-	temp.parent = A.parent;
-    temp.partner = A.partner;
-	// This essentially finds the average of the weighted vectors to determine the position of the barycenter
-	double AposRatio = A.mass / temp.mass,
-		BposRatio = B.mass / temp.mass;
-	StateVect AposScaled = Scale(AposRatio, A.position),
-		BposScaled = Scale(BposRatio, B.position);
-	temp.position = Add(AposScaled, BposScaled);
+    bin.isStar = A.isStar || B.isStar;
+    // This essentially finds the average of the weighted vectors to determine the position of the barycenter
+    double AposRatio = A.mass / bin.mass,
+        BposRatio = B.mass / bin.mass;
+    StateVect AposScaled = Scale(AposRatio, A.position),
+        BposScaled = Scale(BposRatio, B.position);
+    bin.position = Add(AposScaled, BposScaled);
 
-	// this also averages the velocity vectors, weighted based on distance from barycenter, to find the velocity of the barycenter
-	double distTotal = Distance(A, B),
-		AvelRatio = (Distance(B, temp) / distTotal),
-		BvelRatio = (Distance(A, temp) / distTotal);
-	StateVect AvelScaled = Scale(AvelRatio, A.velocity),
-		BvelScaled = Scale(BvelRatio, B.velocity);
-	temp.velocity = Add(AvelScaled, BvelScaled);
+    // this also averages the velocity vectors, weighted based on distance from barycenter, to find the velocity of the barycenter
+    double distTotal = Distance(A, B),
+        AvelRatio = (Distance(B, bin) / distTotal),
+        BvelRatio = (Distance(A, bin) / distTotal);
+    StateVect AvelScaled = Scale(AvelRatio, A.velocity),
+        BvelScaled = Scale(BvelRatio, B.velocity);
+    bin.velocity = Add(AvelScaled, BvelScaled);
 
-	temp.child.push_back(&A);
-	temp.child.push_back(&B);
-	//temp.mass = 5.75e18;
-	binaryList.push_back(temp);
-}
+    // should bin.tilt and bin.angularVelocity be calculated for use in orbits of children?
 
-void PrintFile(std::ofstream& f, Object & o)
-{
-
-	f << o.type << "\t\t\t\t\t\"" << o.name << "\""
-		<< "\n{"
-		<< "\n\tParentBody\t\t\t\"" << o.parent->name << "\"";
-	if (&o == root && o.type == "Barycenter")
-	{
-		f << "\n}\n\n";
-		for (int i = 0; i < o.child.size(); i++)
-			PrintFile(f, *o.child.at(i));
-		return;
-	}
-	else if (&o == root && o.type == "Star")
-	{
-		f << "\n\tLum\t\t\t\t\t" << o.luminosity
-			<< "\n\tTeff\t\t\t\t" << o.temp
-			<< "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
-			<< "\n\tRadius\t\t\t\t" << o.radius
-			<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod
-            //<< "\n\tObliquity:\t\t" << o.obliquity
-			<< "\n}\n\n";
-		for (int i = 0; i < o.child.size(); i++)
-			PrintFile(f, *o.child.at(i));
-		return;
-	}
-
-	if (o.type != "Barycenter")
-		f << "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
-		<< "\n\tRadius\t\t\t\t" << o.radius
-		<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod
-		<< "\n\n\tInterior"
-		<< "\n\t{\n\t\tComposition"
-		<< "\n\t\t{"
-		<< "\n\t\t\tHydrogen\t" << o.hydrogenMass
-		<< "\n\t\t\tSilicates\t" << o.silicateMass
-		<< "\n\t\t\tIces\t\t" << o.waterMass
-		<< "\n\t\t\tMetals\t\t" << o.ironMass
-		<< "\n\t\t}\n\t}";
-
-	//f << "\n\tObliquity:\t\t" << o.obliquity
-	f << "\n\n\tOrbit"
-		<< "\n\t{"
-		<< "\n\t\tRefPlane\t\t\"Equator\""
-		<< "\n\t\tSemiMajorAxis\t" << o.semimajor
-		<< "\n\t\tPeriod\t\t\t" << o.period
-		<< "\n\t\tEccentricity\t" << o.eccentricity
-		<< "\n\t\tInclination\t\t" << o.inclination
-		<< "\n\t\tAscendingNode\t" << o.longOfAscNode
-		<< "\n\t\tArgOfPericenter\t" << o.argOfPeriapsis
-		<< "\n\t\tMeanAnomaly\t\t" << o.meanAnomaly
-		<< "\n\t}";
-
-	if (o.type != "Barycenter")
-		f << "\n\n\tAtmosphere"
-		<< "\n\t{"
-		<< "\n\t\tPressure\t\t" << o.surfacePressure
-		<< "\n\t\tGreenhouse\t\t" << o.greenhouse
-		<< "\n\t}";
-
-	f << "\n}\n\n";
-
-	for (int i = 0; i < o.child.size(); i++)
-		PrintFile(f, *o.child.at(i));
-	return;
+    if (bin.parent != NULL && bin.parent->type == "Barycenter" && bin.partner->partner == &bin)
+        UpdateBinary(*bin.parent, bin, *bin.partner);
 }
 
 void CalcOrbit(Object& obj)
 {
-
 	for (int i = 0; i < obj.child.size(); i++)
 		CalcOrbit(*obj.child.at(i));
 
@@ -473,45 +410,13 @@ void CalcOrbit(Object& obj)
 		obj.argOfPeriapsis = (acos(DotProduct(n, eccentVect) / (n.magnitude() * eccentVect.magnitude())));
 	else
 		obj.argOfPeriapsis = ((2 * PI) - acos(DotProduct(n, eccentVect) / (n.magnitude() * eccentVect.magnitude())));
-
-    EulerAngles angles = QuaternionToEuler(obj.orientation);
-
-/*
-In proper Euler angles:
-1st is precession (arg. of obliquity)
-2nd is axial tilt / obliquity
-3rd is rotation ("yaw" in US2)
-*/
-	angles.pitch = angles.pitch * (180 / PI);
-    angles.roll = angles.roll * (180 / PI);
-	if (angles.yaw >= 0.0)
-		angles.yaw = angles.yaw * (180 / PI);
-	else
-		angles.yaw = ((2 * PI) + angles.yaw) * (180 / PI);
-
-
-    obj.obliquity = angles.pitch + obj.inclination; // relative to orbital plane
-// still wrong!!!
-// std::cout << "\n" << obj.name << "  obl:  " << obj.obliquity << "  arg:  " << angles.roll << "  yaw:  " << angles.yaw << "\n";
-
-/*
-	StateVect left, forward, parentTemp;
-	parentTemp.x = (obj.argOfPeriapsis - obj.parent->position.x);
-	parentTemp.y = (obj.argOfPeriapsis - obj.parent->position.y);
-	parentTemp.z = (obj.argOfPeriapsis - obj.parent->position.z);
-	left = Normalize(parentTemp);Subtract
-	forward = CrossProduct(left, momentVect);
-
-	StateVect rotationAxis, world;
-	rotationAxis = Normalize(obj.angularVelocity);
-	// world =
-	obj.obliquity = (PI - acos(DotProduct(momentVect, world)));
-	// argument of obliquity
-
-*/
-
 	obj.argOfPeriapsis = (obj.argOfPeriapsis * (180 / PI)); // convert to degree
 	obj.argOfPeriapsis -= 90; // convert to equator
+
+    // calculates obliquity
+    StateVect tiltVect = RotateVector(obj.orientation, obj.angularVelocity);
+	obj.obliquity = acos( DotProduct(tiltVect, momentVect) / (tiltVect.magnitude() * momentVect.magnitude()) );
+	obj.obliquity = abs(180 - ((obj.obliquity * (180 / PI))));
 
 	// calculate mean anomaly
 	obj.meanAnomaly = (E - (obj.eccentricity * sin(E)));
@@ -521,57 +426,8 @@ In proper Euler angles:
 	return;
 }
 
-/*
-// from Wikipedia (Tait–Bryan angles)
-EulerAngles QuaternionToEuler(Quaternion& q)
-{
-    EulerAngles angles;
-    // roll (x-axis rotation)
-    double sinr_cosp = 2 * (q.w * q.x + q.y * q.z);
-    double cosr_cosp = 1 - 2 * (q.x * q.x + q.y * q.y);
-    angles.roll = std::atan2(sinr_cosp, cosr_cosp);
-
-    // pitch (y-axis rotation)
-    double sinp = 2 * (q.w * q.y - q.z * q.x);
-    if (std::abs(sinp) >= 1)
-        angles.pitch = std::copysign(PI / 2, sinp); // use 90 degrees if out of range
-    else
-        angles.pitch = std::asin(sinp);
-
-    // yaw (z-axis rotation)
-    double siny_cosp = 2 * (q.w * q.z + q.x * q.y);
-    double cosy_cosp = 1 - 2 * (q.y * q.y + q.z * q.z);
-    angles.yaw = std::atan2(siny_cosp, cosy_cosp);
-
-    return angles;
-}
-*/
-
-// Proper Euler angles ZXZ
-EulerAngles QuaternionToEuler(Quaternion& q)
-{
-    EulerAngles angles;
-
-    double sin2 = (q.x * q.x + q.y * q.y);      // sin(beta)^2
-    double cos2 = (q.w * q.w + q.z * q.z);      // cos(beta)^2
-    double s  = atan(q.z / q.w);                // (gamma+alpha)/2
-    double d  = atan2(q.y, q.x);                // (gamma-alpha)/2
-
-    angles.roll = s - d;                        // alpha
-
-    angles.yaw = s + d;                         // gamma
-
-    if (cos2 != 0.0)
-        angles.pitch = 2.0 * atan(sqrt(sin2/cos2));
-    else
-        angles.pitch = (0.5 > sin2) ? 0 : PI;
-
-    return angles;
-}
-
 void CalcMoreOrbit(Object& obj)
 {
-
 	for (int i = 0; i < obj.child.size(); i++)
 		CalcMoreOrbit(*obj.child.at(i));
 
@@ -597,6 +453,26 @@ void CalcMoreOrbit(Object& obj)
 	//obj.semimajor /= 1000; // converts m to km
 
 	return;
+}
+
+// rotate vector based on a quaternion's rotation matrix
+StateVect RotateVector(Quaternion& q, StateVect& vect)
+{
+    StateVect result;
+
+    result.x = vect.x * (q.w * q.w + q.x * q.x - q.y * q.y - q.z * q.z);
+    result.x += vect.y * (2 * q.x * q.y - 2 * q.w * q.z);
+    result.x += vect.z * (2 * q.x * q.z + 2 * q.w * q.y);
+
+    result.y = vect.x * (2 * q.x * q.y + 2 * q.w * q.z);
+    result.y += vect.y * (q.w * q.w - q.x * q.x + q.y * q.y - q.z * q.z);
+    result.y += vect.z * (2 * q.y * q.z - 2 * q.w * q.x);
+
+    result.z = vect.x * (2 * q.x * q.z - 2 * q.w * q.y);
+    result.z += vect.y * (2 * q.y * q.z + 2 * q.w * q.x);
+    result.z += vect.z * (q.w * q.w - q.x * q.x - q.y * q.y + q.z * q.z);
+
+    return result;
 }
 
 double Distance(Object& A, Object& B)
@@ -690,6 +566,7 @@ void GetData(std::ifstream& inputFile)
 	{
 		Object temp;
 		temp.parent = NULL;
+		temp.partner = NULL;
 		temp.isStar = false;
 		temp.ironMass = 0;
 		temp.waterMass = 0;
@@ -735,7 +612,7 @@ void GetData(std::ifstream& inputFile)
 		while (inputFile >> holder && !(holder.find("\"Luminosity\":") + 1));
 		holder.erase(0, 13);
 		temp.luminosity = std::stod(holder, &sz);
-		temp.luminosity = (temp.luminosity / (3.827 * pow(10, 26))); // converts watts to solar lum
+		temp.luminosity /= 3.827e26; // converts watts to solar lum
 
 		// find molten level
 		while (inputFile >> holder && !(holder.find("\"MoltenLevel\":") + 1));
@@ -792,10 +669,10 @@ void GetData(std::ifstream& inputFile)
             temp.isStar = false;
             temp.type = ""; // will be dealt with after hierarchy is found
         }
+        // in reality hydrostatic equilibrium is determined by shape, but SU2 doesn't seem to store this information
         temp.isRound = temp.mass > HYDRCUTOFF;
-        // in reality hydrostatic equilibrium is determined by shape, but US2 doesn't seem to store this information
 
-		// converts composition into %'s to be printed for SE
+        // converts composition into %'s to be printed for SE
 		compositionMassTotal = temp.hydrogenMass + temp.waterMass + temp.ironMass;
 		temp.silicateMass = temp.mass - compositionMassTotal;
 		temp.hydrogenMass /= temp.mass / 100;
@@ -873,15 +750,7 @@ void GetData(std::ifstream& inputFile)
 	}
 }
 
-/*
-
-The reason this is needed is because Universe Sandbox 2 doesn't update the status of its bodies based on orbital relationships.
-You can put an Earth around Jupiter, change some stats, but Earth is still considered a planet, not a moon.
-You can even blow stuff off a star until it's an asteroid, but its core fragment is still registered as a star.
-So this function is here to re-evaluate each bodies according to their orbital relationships and mass, as used by SE.
-
-*/
-
+// evaluate type according to orbital relationships and mass (as defined by IAU / used by SE)
 void Typifier(Object& obj)
 {
     if (&obj == root || (obj.partner != obj.parent && (obj.parent == root && obj.mass > obj.partner->mass)))
@@ -930,3 +799,69 @@ bool ClearanceCheck(Object& obj)
         return (K_KGKGAU * (obj.mass / (pow(obj.parent->mass, 5.0/2.0) * pow(obj.semimajor, 9.0/8.0))) > 1);
 }
 
+void PrintFile(std::ofstream& f, Object & o)
+{
+
+	f << o.type << "\t\t\t\t\t\"" << o.name << "\""
+		<< "\n{"
+		<< "\n\tParentBody\t\t\t\"" << o.parent->name << "\"";
+	if (&o == root && o.type == "Barycenter")
+	{
+		f << "\n}\n\n";
+		for (int i = 0; i < o.child.size(); i++)
+			PrintFile(f, *o.child.at(i));
+		return;
+	}
+	else if (&o == root && o.type == "Star")
+	{
+		f << "\n\tLum\t\t\t\t\t" << o.luminosity
+			<< "\n\tTeff\t\t\t\t" << o.temp
+			<< "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
+			<< "\n\tRadius\t\t\t\t" << o.radius
+			<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod
+            << "\n\tObliquity:\t\t" << o.obliquity
+			<< "\n}\n\n";
+		for (int i = 0; i < o.child.size(); i++)
+			PrintFile(f, *o.child.at(i));
+		return;
+	}
+
+	if (o.type != "Barycenter")
+		f << "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
+		<< "\n\tRadius\t\t\t\t" << o.radius
+		<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod
+		<< "\n\tObliquity:\t\t" << o.obliquity
+		<< "\n\n\tInterior"
+		<< "\n\t{\n\t\tComposition"
+		<< "\n\t\t{"
+		<< "\n\t\t\tHydrogen\t" << o.hydrogenMass
+		<< "\n\t\t\tSilicates\t" << o.silicateMass
+		<< "\n\t\t\tIces\t\t" << o.waterMass
+		<< "\n\t\t\tMetals\t\t" << o.ironMass
+		<< "\n\t\t}\n\t}";
+
+	f << "\n\n\tOrbit"
+		<< "\n\t{"
+		<< "\n\t\tRefPlane\t\t\"Equator\""
+		<< "\n\t\tSemiMajorAxis\t" << o.semimajor
+		<< "\n\t\tPeriod\t\t\t" << o.period
+		<< "\n\t\tEccentricity\t" << o.eccentricity
+		<< "\n\t\tInclination\t\t" << o.inclination
+		<< "\n\t\tAscendingNode\t" << o.longOfAscNode
+		<< "\n\t\tArgOfPericenter\t" << o.argOfPeriapsis
+		<< "\n\t\tMeanAnomaly\t\t" << o.meanAnomaly
+		<< "\n\t}";
+
+	if (o.type != "Barycenter")
+		f << "\n\n\tAtmosphere"
+		<< "\n\t{"
+		<< "\n\t\tPressure\t\t" << o.surfacePressure
+		<< "\n\t\tGreenhouse\t\t" << o.greenhouse
+		<< "\n\t}";
+
+	f << "\n}\n\n";
+
+	for (int i = 0; i < o.child.size(); i++)
+		PrintFile(f, *o.child.at(i));
+	return;
+}
