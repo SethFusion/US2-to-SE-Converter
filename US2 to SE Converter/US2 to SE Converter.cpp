@@ -4,7 +4,7 @@
 #include <vector>
 #include <list>
 #include <math.h>
-#include <dirent.h>
+#include "dirent.h"
 #include <algorithm> // for sort()
 #include <limits> // for max double
 
@@ -199,7 +199,7 @@ void BuildHierarchy(std::list<Object>& binary, std::list<Object>::iterator& b)
         for (int i = 0; i < size; i++)
         {
             max_f = 0.0;
-            min_d = std::numeric_limits<double>::max();
+			min_d = 1.79769e308; //std::numeric_limits<double>::max(); // having problems with "max()" being defined as a macro in another header
             for (int j = 0; j < size; j++)
             {
                 if (i==j) continue;
@@ -713,7 +713,7 @@ void GetData(std::ifstream& inputFile)
 		temp.angularVelocity.y = std::stod(y, &sz); // y
 		temp.angularVelocity.z = std::stod(z, &sz); // z
 		temp.rotationPeriod = temp.angularVelocity.magnitude();
-		temp.rotationPeriod = ((2 * PI) / abs(temp.rotationPeriod)); // calculates rot period
+		temp.rotationPeriod = ((2 * PI) / temp.rotationPeriod); // calculates rot period
 		temp.rotationPeriod /= 3600; // sec to hours
 
 		// find position and add x y z to vector
@@ -830,7 +830,7 @@ void PrintFile(std::ofstream& f, Object & o)
 		f << "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
 		<< "\n\tRadius\t\t\t\t" << o.radius
 		<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod
-		<< "\n\tObliquity:\t\t" << o.obliquity
+		<< "\n\tObliquity:\t\t\t" << o.obliquity
 		<< "\n\n\tInterior"
 		<< "\n\t{\n\t\tComposition"
 		<< "\n\t\t{"
