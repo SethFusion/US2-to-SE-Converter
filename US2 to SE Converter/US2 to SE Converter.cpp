@@ -9,7 +9,8 @@
 // #include <limits> // for max double
 
 #define STARCUTOFF 3e28 // 2.5e28 ~ 13 Jupiter masses is the Brown Dwarf cutoff used by SE
-#define HYDRCUTOFF 2e19 // mass < Mimas of ~2e19 is used as cutoff
+#define HYDROUPPER 4e20 // Vesta < mass < Ceres of ~4e20 is used as definite upper cutoff
+#define HYDROLOWER 2e19 // mass < Mimas of ~2e19 is used as lower cutoff depending on neighborhood
 #define K_KGKGAU 7.53445e53
 // In solar-mass, earth-mass & AU units, the PI discriminant constant K = 807.
 // But we use kg, kg, AU instead, so our constant = K*pow(solar-mass, 5.0/2.0)/earth-mass = 7.53445e53
@@ -83,13 +84,13 @@ void GetData(std::ifstream&);
 void BuildHierarchy(std::list<Object>&, std::list<Object>::iterator&);
 void Bond(std::list<Object>&, std::list<Object>::iterator&, Object&, Object&);
 void Typifier(Object&);
-bool ClearanceCheck(Object&);
 void PrintFile(std::ofstream&, Object&);
 
 // math functions
 void UpdateBinary(Object&, Object&, Object&);
 void CalcOrbit(Object&);
 void CalcMoreOrbit(Object&);
+bool ClearanceCheck(Object&);
 StateVect RotateVector(Quaternion&, StateVect&);
 double Distance(Object&, Object&);
 StateVect CrossProduct(StateVect&, StateVect&);
@@ -452,7 +453,21 @@ void CalcMoreOrbit(Object& obj)
 	obj.semimajor /= 1.496e11; // converts m to AU
 	//obj.semimajor /= 1000; // converts m to km
 
+    // hydrostatic equilibrium is determined by shape, but SU2 doesn't seem to store this information
+    // large asteroids that pass the mass test are still not round because of frequent collisions (their orbits aren't clear)
+    obj.isRound = (obj.mass > HYDROUPPER) || (obj.mass > HYDROLOWER && ClearanceCheck(obj));
+
 	return;
+}
+
+bool ClearanceCheck(Object& obj)
+{
+    // Pi discriminant for orbital clearance (a mass range of 10e23 can be used instead,
+    // which would make 4 solar system moons dwarf planets if they weren't moons)
+    if (obj.partner != obj.parent) // orbits own barycenter
+        return ( K_KGKGAU * (obj.mass / (pow(obj.parent->parent->mass, 5.0/2.0) * pow(obj.parent->semimajor, 9.0/8.0))) > 1 );
+    else
+        return ( K_KGKGAU * (obj.mass / (pow(obj.parent->mass, 5.0/2.0) * pow(obj.semimajor, 9.0/8.0))) > 1 );
 }
 
 // rotate vector based on a quaternion's rotation matrix
@@ -669,8 +684,6 @@ void GetData(std::ifstream& inputFile)
             temp.isStar = false;
             temp.type = ""; // will be dealt with after hierarchy is found
         }
-        // in reality hydrostatic equilibrium is determined by shape, but SU2 doesn't seem to store this information
-        temp.isRound = temp.mass > HYDRCUTOFF;
 
         // converts composition into %'s to be printed for SE
 		compositionMassTotal = temp.hydrogenMass + temp.waterMass + temp.ironMass;
@@ -783,16 +796,6 @@ void Typifier(Object& obj)
     }
     else // incl. binary comet or asteroid
         obj.type = (obj.eccentricity > 0.4) ? "Comet" : "Asteroid";
-}
-
-bool ClearanceCheck(Object& obj)
-{
-    // Pi discriminant for orbital clearance (a mass range of 10e23 can be used instead,
-    // which would make 4 solar system moons dwarf planets if they weren't moons)
-    if (obj.partner != obj.parent) // orbits own barycenter
-        return ( K_KGKGAU * (obj.mass / (pow(obj.parent->parent->mass, 5.0/2.0) * pow(obj.parent->semimajor, 9.0/8.0))) > 1 );
-    else
-        return ( K_KGKGAU * (obj.mass / (pow(obj.parent->mass, 5.0/2.0) * pow(obj.semimajor, 9.0/8.0))) > 1 );
 }
 
 void PrintFile(std::ofstream& f, Object & o)
