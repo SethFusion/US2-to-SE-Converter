@@ -6,7 +6,7 @@
 #include <math.h>
 #include "dirent.h"
 #include <algorithm> // for sort()
-#include <limits> // for max double
+// #include <limits> // for max double
 
 #define STARCUTOFF 3e28 // 2.5e28 ~ 13 Jupiter masses is the Brown Dwarf cutoff used by SE
 #define HYDRCUTOFF 2e19 // mass < Mimas of ~2e19 is used as cutoff
@@ -290,7 +290,7 @@ void Bond(std::list<Object>& binary, std::list<Object>::iterator& b, Object& dom
     }
 
     // whether bonding is direct or requires a barycenter
-    if (dom.type == "Star" && sub.type == "Star" || (sub.mass / dom.mass) > 0.01)
+    if ((dom.type == "Star" && sub.type == "Star") || (sub.mass / dom.mass) > 0.01)
     {
         // create barycenter with heavier object first
         Object temp;
@@ -787,16 +787,12 @@ void Typifier(Object& obj)
 
 bool ClearanceCheck(Object& obj)
 {
-    if (obj.parent->parent == root)
-        return true;
     // Pi discriminant for orbital clearance (a mass range of 10e23 can be used instead,
     // which would make 4 solar system moons dwarf planets if they weren't moons)
     if (obj.partner != obj.parent) // orbits own barycenter
-    {
-        return (K_KGKGAU * (obj.mass / (pow(obj.parent->parent->mass, 5.0/2.0) * pow(obj.parent->semimajor, 9.0/8.0))) > 1);
-    }
+        return ( K_KGKGAU * (obj.mass / (pow(obj.parent->parent->mass, 5.0/2.0) * pow(obj.parent->semimajor, 9.0/8.0))) > 1 );
     else
-        return (K_KGKGAU * (obj.mass / (pow(obj.parent->mass, 5.0/2.0) * pow(obj.semimajor, 9.0/8.0))) > 1);
+        return ( K_KGKGAU * (obj.mass / (pow(obj.parent->mass, 5.0/2.0) * pow(obj.semimajor, 9.0/8.0))) > 1 );
 }
 
 void PrintFile(std::ofstream& f, Object & o)
@@ -852,7 +848,7 @@ void PrintFile(std::ofstream& f, Object & o)
 		<< "\n\t\tMeanAnomaly\t\t" << o.meanAnomaly
 		<< "\n\t}";
 
-	if (o.type != "Barycenter")
+	if (o.type != "Barycenter" && o.hydrogenMass < 0.001)
 		f << "\n\n\tAtmosphere"
 		<< "\n\t{"
 		<< "\n\t\tPressure\t\t" << o.surfacePressure
