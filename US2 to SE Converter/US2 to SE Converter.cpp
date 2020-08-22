@@ -84,6 +84,7 @@ void GetData(std::ifstream&);
 void BuildHierarchy(std::list<Object>&, std::list<Object>::iterator&);
 void Bond(std::list<Object>&, std::list<Object>::iterator&, Object&, Object&);
 void Typifier(Object&);
+void Classifier(Object&);
 void PrintFile(std::ofstream&, Object&);
 
 // math functions
@@ -160,7 +161,10 @@ int main()
             CalcMoreOrbit(*root);
 
             for (int i = 0; i < object.size(); i++)
+            {
                 Typifier(object.at(i));
+                Classifier(object.at(i));
+            }
 
             std::ofstream starFile(starFileName.c_str());
             starFile << "StarBarycenter\t\t\"" << binary.begin()->name << "\"\n{}\n";
@@ -798,6 +802,50 @@ void Typifier(Object& obj)
         obj.type = (obj.eccentricity > 0.4) ? "Comet" : "Asteroid";
 }
 
+void Classifier(Object& obj)
+{
+    if (obj.type == "Star")
+    {
+        double density = 0.75 * obj.mass / (PI * pow(1000 * obj.radius, 3));
+        if (obj.class_ == "blackhole")
+            obj.class_ = "X";
+		else if (density > 1e16)
+            obj.class_ = "Q";
+		else if (density > 1e8)
+            obj.class_ = "WD";
+        else
+            obj.class_ = "";
+    }
+    else if (obj.isRound) // boundaries currently used by SE, see their blog
+    {
+        if (obj.hydrogenMass > 0.01)
+        {
+            if (obj.hydrogenMass < 25)
+                obj.class_ = "Neptune";
+            else
+                obj.class_ = "Jupiter";
+        }
+        else
+        {
+            if (obj.ironMass > 50)
+                obj.class_ = "Ferria";
+            //else if (obj.carbonMass > 25)
+            //    obj.class_ = "Carbonia";
+/*
+Because US2 doesn't distinguish between carbon and silicates, maybe there should be a random draw for a given system's carbonToOxygen ratio? (0.316 in the Solar System)
+oxygenMass = (silicateMass * 2) / 3; assuming no carbon
+carbonMass = carbonToOxygen*((silicateMass * 2) / 3); assumes some of US2's oxygen is actually carbon
+*/
+            else if (obj.waterMass > 25)
+                obj.class_ = "Aquaria";
+            else
+                obj.class_ = "Terra";
+        }
+    }
+    else
+        obj.class_ = "Asteroid";
+}
+
 void PrintFile(std::ofstream& f, Object & o)
 {
 
@@ -813,7 +861,8 @@ void PrintFile(std::ofstream& f, Object & o)
 	}
 	else if (&o == root && o.type == "Star")
 	{
-		f << "\n\tLum\t\t\t\t\t" << o.luminosity
+		f << "\n\tClass\t\t\t\t\"" << o.class_ << "\""
+            << "\n\tLum\t\t\t\t\t" << o.luminosity
 			<< "\n\tTeff\t\t\t\t" << o.temp
 			<< "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
 			<< "\n\tRadius\t\t\t\t" << o.radius
@@ -826,7 +875,8 @@ void PrintFile(std::ofstream& f, Object & o)
 	}
 
 	if (o.type != "Barycenter")
-		f << "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
+		f << "\n\tClass\t\t\t\t\"" << o.class_ << "\""
+		<< "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
 		<< "\n\tRadius\t\t\t\t" << o.radius
 		<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod
 		<< "\n\tObliquity:\t\t\t" << o.obliquity
@@ -851,7 +901,7 @@ void PrintFile(std::ofstream& f, Object & o)
 		<< "\n\t\tMeanAnomaly\t\t" << o.meanAnomaly
 		<< "\n\t}";
 
-	if (o.type != "Barycenter" && o.hydrogenMass < 0.001)
+	if (o.type != "Barycenter" && o.hydrogenMass < 0.01)
 		f << "\n\n\tAtmosphere"
 		<< "\n\t{"
 		<< "\n\t\tPressure\t\t" << o.surfacePressure
