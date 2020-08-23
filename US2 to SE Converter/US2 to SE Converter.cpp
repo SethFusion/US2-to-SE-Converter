@@ -64,7 +64,7 @@ struct Object
 
 	// general
 	int temp;
-	double silicateMass, ironMass, waterMass, hydrogenMass, surfacePressure, greenhouse;
+	double silicateMass, ironMass, waterMass, hydrogenMass, surfacePressure, greenhouse, roughness;
 
 	// used for stars
 	bool isStar;
@@ -609,6 +609,7 @@ void GetData(std::ifstream& inputFile)
 			temp.temp = 0;
 			temp.greenhouse = 0;
 			temp.surfacePressure = 0;
+			temp.roughness = 0;
 			temp.luminosity = 0;
 			temp.isStar = false;
 			goto NoTemperature;
@@ -633,12 +634,10 @@ void GetData(std::ifstream& inputFile)
 		temp.luminosity = std::stod(holder, &sz);
 		temp.luminosity /= 3.827e26; // converts watts to solar lum
 
-		// find molten level
-		while (inputFile >> holder && !(holder.find("\"MoltenLevel\":") + 1));
 		// Find mass composition, if it exists
 		while (inputFile >> holder &&
 			holder != "\"Iron\":{" && holder != "\"Water\":{" && holder != "\"Hydrogen\":{" &&
-			(!(holder.find("\"Id\":") + 1)));
+			(!(holder.find("\"ElevationToRadiusRatio\":") + 1)));
 		// if the mass is 100% silicate, the next part is skipped over
 		if (holder == "\"Iron\":{")
 		{
@@ -649,7 +648,7 @@ void GetData(std::ifstream& inputFile)
 
 			while (inputFile >> holder &&
 				holder != "\"Water\":{" && holder != "\"Hydrogen\":{" &&
-				(!(holder.find("\"Id\":") + 1)));
+				(!(holder.find("\"ElevationToRadiusRatio\":") + 1)));
 		}
 		if (holder == "\"Water\":{")
 		{
@@ -660,7 +659,7 @@ void GetData(std::ifstream& inputFile)
 
 			while (inputFile >> holder &&
 				holder != "\"Hydrogen\":{" &&
-				(!(holder.find("\"Id\":") + 1)));
+				(!(holder.find("\"ElevationToRadiusRatio\":") + 1)));
 		}
 		if (holder == "\"Hydrogen\":{")
 		{
@@ -669,8 +668,13 @@ void GetData(std::ifstream& inputFile)
 			holder.erase(0, 7);
 			temp.hydrogenMass = std::stod(holder, &sz);
 
-			while (inputFile >> holder && (!(holder.find("\"Id\":") + 1)));
+			while (inputFile >> holder && (!(holder.find("\"ElevationToRadiusRatio\":") + 1)));
 		}
+
+        // find surface roughness
+        holder.erase(0, 25);
+        temp.roughness = std::stod(holder, &sz);
+
 	NoTemperature:;
 
 		// find mass, isStar, type, shape
@@ -702,6 +706,7 @@ void GetData(std::ifstream& inputFile)
 		holder.erase(0, 9);
 		temp.radius = std::stod(holder, &sz);
 		temp.radius /= 1000; // m to km
+        temp.roughness *= temp.radius; // get the elevation span
 
 		std::string x, y, z;
 
@@ -831,11 +836,6 @@ void Classifier(Object& obj)
                 obj.class_ = "Ferria";
             //else if (obj.carbonMass > 25)
             //    obj.class_ = "Carbonia";
-/*
-Because US2 doesn't distinguish between carbon and silicates, maybe there should be a random draw for a given system's carbonToOxygen ratio? (0.316 in the Solar System)
-oxygenMass = (silicateMass * 2) / 3; assuming no carbon
-carbonMass = carbonToOxygen*((silicateMass * 2) / 3); assumes some of US2's oxygen is actually carbon
-*/
             else if (obj.waterMass > 25)
                 obj.class_ = "Aquaria";
             else
@@ -902,7 +902,11 @@ void PrintFile(std::ofstream& f, Object & o)
 		<< "\n\t}";
 
 	if (o.type != "Barycenter" && o.hydrogenMass < 0.01)
-		f << "\n\n\tAtmosphere"
+		f << "\n\n\tSurface"
+		<< "\n\t{"
+		<< "\n\t\tBumpHeight\t\t" << o.roughness
+		<< "\n\t}"
+        << "\n\n\tAtmosphere"
 		<< "\n\t{"
 		<< "\n\t\tPressure\t\t" << o.surfacePressure
 		<< "\n\t\tGreenhouse\t\t" << o.greenhouse
