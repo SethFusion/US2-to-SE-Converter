@@ -936,7 +936,7 @@ void PrintFile(std::ofstream& f, Object & o)
 		<< "\n\t\tMeanAnomaly\t\t" << o.meanAnomaly
 		<< "\n\t}";
 
-	if (o.type != "Barycenter" /*&& o.hydrogenMass < 0.01 */)
+	if (o.type != "Barycenter" && o.hydrogenMass < 0.01)
     {
 		f << "\n\n\tSurface"
 		<< "\n\t{"
