@@ -867,7 +867,7 @@ void PrintFile(std::ofstream& f, Object & o)
 			<< "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
 			<< "\n\tRadius\t\t\t\t" << o.radius
 			<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod
-            << "\n\tObliquity:\t\t" << o.obliquity
+            //<< "\n\tObliquity:\t\t" << o.obliquity
 			<< "\n}\n\n";
 		for (int i = 0; i < o.child.size(); i++)
 			PrintFile(f, *o.child.at(i));
@@ -884,7 +884,9 @@ void PrintFile(std::ofstream& f, Object & o)
 		<< "\n\t{\n\t\tComposition"
 		<< "\n\t\t{"
 		<< "\n\t\t\tHydrogen\t" << o.hydrogenMass
+		<< "\n\t\t\tHelium\t\t0"
 		<< "\n\t\t\tSilicates\t" << o.silicateMass
+		<< "\n\t\t\tCarbides\t0"					// helium/carbide output added for the sake of the user
 		<< "\n\t\t\tIces\t\t" << o.waterMass
 		<< "\n\t\t\tMetals\t\t" << o.ironMass
 		<< "\n\t\t}\n\t}";
