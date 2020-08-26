@@ -64,7 +64,7 @@ struct Object
 
 	// general
 	int temp;
-	double silicateMass, ironMass, waterMass, hydrogenMass, surfacePressure, greenhouse, roughness;
+	double silicateMass, ironMass, waterMass, hydrogenMass, surfacePressure, albedo, greenhouse, roughness, depth;
 
 	// used for stars
 	bool isStar;
@@ -602,19 +602,26 @@ void GetData(std::ifstream& inputFile)
 		holder.erase(holder.size() - 2, 2);
 		temp.name = holder;
 
-		// find temperature
-		while (inputFile >> holder && !(holder.find("\"SurfaceTemperature\":") + 1) && !(holder.find("\"Id\":") + 1));
-		if (holder.find("\"Id\":") + 1) // If an object does not have a temperature, it skips the next few items because they don't exist either
+		// find albedo
+		while (inputFile >> holder && !(holder.find("\"Albedo\":") + 1) && !(holder.find("\"Id\":") + 1));
+		if (holder.find("\"Id\":") + 1) // If an object does not have an albedo, it skips the next few items because they don't exist either
 		{
 			temp.temp = 0;
+			temp.albedo = 0;
 			temp.greenhouse = 0;
 			temp.surfacePressure = 0;
-			temp.roughness = 0;
 			temp.luminosity = 0;
+			temp.roughness = 0;
+			temp.depth = 0;
 			temp.isStar = false;
-			goto NoTemperature;
+			goto NoAlbedo;
 		}
-		holder.erase(0, 21);
+		holder.erase(0, 9);
+		temp.albedo = std::stod(holder, &sz);
+
+		// find temperature
+		while (inputFile >> holder && !(holder.find("\"SurfaceTemperature\":") + 1));
+        holder.erase(0, 21);
 		temp.temp = std::stoi(holder, &sz);
 
 		// find greenhouse
@@ -633,6 +640,10 @@ void GetData(std::ifstream& inputFile)
 		holder.erase(0, 13);
 		temp.luminosity = std::stod(holder, &sz);
 		temp.luminosity /= 3.827e26; // converts watts to solar lum
+
+		while (inputFile >> holder && !(holder.find("\"LiquidLevel\":") + 1));
+		holder.erase(0, 14);
+		temp.depth = std::stod(holder, &sz);
 
 		// Find mass composition, if it exists
 		while (inputFile >> holder &&
@@ -675,7 +686,7 @@ void GetData(std::ifstream& inputFile)
         holder.erase(0, 25);
         temp.roughness = std::stod(holder, &sz);
 
-	NoTemperature:;
+	NoAlbedo:;
 
 		// find mass, isStar, type, shape
 		while (inputFile >> holder && !(holder.find("\"Mass\":") + 1));
@@ -825,6 +836,7 @@ void Classifier(Object& obj)
     {
         if (obj.hydrogenMass > 0.01)
         {
+            obj.depth = 0;
             if (obj.hydrogenMass < 25)
                 obj.class_ = "Neptune";
             else
@@ -832,6 +844,22 @@ void Classifier(Object& obj)
         }
         else
         {
+            // can't account for everything... so ice caps and stuff need to be subtracted from ocean depth manually, then added to script with icecapHeight
+            if (obj.temp + obj.greenhouse > 253)
+            {
+                double shell_vol = PI * (4/3) * (pow(obj.radius + obj.roughness/2, 3) - pow(obj.radius - obj.roughness/2, 3));
+                double water_vol = 1e-12*(obj.waterMass*obj.mass/100); // water volume in cubic kilometer
+                if (shell_vol/2 <= water_vol)
+                {
+                    water_vol -= shell_vol/2;
+                    obj.depth = cbrt(3*water_vol/(4*PI) + pow(obj.radius + obj.roughness/2, 3)) - (obj.radius - obj.roughness/2);
+                }
+                else
+                    obj.depth *= obj.roughness; // thought about scaling it by some polynomial curve, but this feels less like guesswork
+            }
+            else
+                obj.depth = 0;
+
             if (obj.ironMass > 50)
                 obj.class_ = "Ferria";
             //else if (obj.carbonMass > 25)
@@ -843,7 +871,10 @@ void Classifier(Object& obj)
         }
     }
     else
+    {
+        obj.depth = 0;
         obj.class_ = "Asteroid";
+    }
 }
 
 void PrintFile(std::ofstream& f, Object & o)
@@ -867,7 +898,7 @@ void PrintFile(std::ofstream& f, Object & o)
 			<< "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
 			<< "\n\tRadius\t\t\t\t" << o.radius
 			<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod
-            //<< "\n\tObliquity:\t\t" << o.obliquity
+            << "\n\tObliquity:\t\t" << o.obliquity
 			<< "\n}\n\n";
 		for (int i = 0; i < o.child.size(); i++)
 			PrintFile(f, *o.child.at(i));
@@ -878,18 +909,20 @@ void PrintFile(std::ofstream& f, Object & o)
 		f << "\n\tClass\t\t\t\t\"" << o.class_ << "\""
 		<< "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
 		<< "\n\tRadius\t\t\t\t" << o.radius
+		<< "\n\tLum\t\t\t\t\t" << o.luminosity
+		<< "\n\tTeff\t\t\t\t" << o.temp
+		<< "\n\tAlbedoBond:\t\t\t" << o.albedo
 		<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod
 		<< "\n\tObliquity:\t\t\t" << o.obliquity
-		<< "\n\n\tInterior"
-		<< "\n\t{\n\t\tComposition"
-		<< "\n\t\t{"
-		<< "\n\t\t\tHydrogen\t" << o.hydrogenMass
-		<< "\n\t\t\tHelium\t\t0"
+		<< "\n\n\tComposition"
+		<< "\n\t{"
+		<< "\n\t\tHydrogen\t" << o.hydrogenMass
+		<< "\n\t\tHelium\t\t0"
 		<< "\n\t\t\tSilicates\t" << o.silicateMass
-		<< "\n\t\t\tCarbides\t0"					// helium/carbide output added for the sake of the user
-		<< "\n\t\t\tIces\t\t" << o.waterMass
-		<< "\n\t\t\tMetals\t\t" << o.ironMass
-		<< "\n\t\t}\n\t}";
+		<< "\n\t\tCarbides\t0"					// helium/carbide output added for the sake of the user
+		<< "\n\t\tIces\t\t" << o.waterMass
+		<< "\n\t\tMetals\t\t" << o.ironMass
+		<< "\n\t}";
 
 	f << "\n\n\tOrbit"
 		<< "\n\t{"
@@ -903,16 +936,30 @@ void PrintFile(std::ofstream& f, Object & o)
 		<< "\n\t\tMeanAnomaly\t\t" << o.meanAnomaly
 		<< "\n\t}";
 
-	if (o.type != "Barycenter" && o.hydrogenMass < 0.01)
+	if (o.type != "Barycenter" /*&& o.hydrogenMass < 0.01 */)
+    {
 		f << "\n\n\tSurface"
 		<< "\n\t{"
-		<< "\n\t\tBumpHeight\t\t" << o.roughness
-		<< "\n\t}"
+		<< "\n\t\tBumpHeight\t\t" << o.roughness;
+
+		if (o.depth > 0)
+            f << "\n\t\tBumpOffset\t\t" << o.depth
+            << "\n\t}"
+            << "\n\n\tOcean"
+            << "\n\t{"
+            << "\n\t\tDepth\t\t\t" << o.depth
+            << "\n\t\tComposition"
+            << "\n\t\t{"
+            << "\n\t\t\tH2O\t\t" << "100"
+            << "\n\t\t}";
+
+		f << "\n\t}"
         << "\n\n\tAtmosphere"
 		<< "\n\t{"
 		<< "\n\t\tPressure\t\t" << o.surfacePressure
 		<< "\n\t\tGreenhouse\t\t" << o.greenhouse
 		<< "\n\t}";
+    }
 
 	f << "\n}\n\n";
 
