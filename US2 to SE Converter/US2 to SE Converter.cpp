@@ -204,7 +204,7 @@ void BuildHierarchy(std::list<Object>& binary, std::list<Object>::iterator& b)
         for (int i = 0; i < size; i++)
         {
             max_f = 0.0;
-			min_d = 1.79769e308; //std::numeric_limits<double>::max(); // having problems with "max()" being defined as a macro in another header
+			min_d = 1.79769e308;
             for (int j = 0; j < size; j++)
             {
                 if (i==j) continue;
@@ -379,7 +379,7 @@ void CalcOrbit(Object& obj)
 	// calculate inclination
 	obj.inclination = (acos(momentVect.z / momentVect.magnitude()));
 	obj.inclination = (obj.inclination * (180 / PI));
-	obj.inclination -= 90; // convert to equator
+	//obj.inclination -= 90; // convert to equator
 
 	// calculate eccentricity vector and eccentricity
 	StateVect eccentVect, VcrossH = CrossProduct(obj.velocity, momentVect);
@@ -408,7 +408,7 @@ void CalcOrbit(Object& obj)
 	else
 		obj.longOfAscNode = ( (2 * PI) - acos(n.x / n.magnitude()));
 	obj.longOfAscNode = (obj.longOfAscNode * (180 / PI));
-	obj.longOfAscNode -= 90; // convert to equator
+	//obj.longOfAscNode -= 90; // convert to equator
 
 	// calculate argOfPeriapsis
 	if (eccentVect.z >= 0.0)
@@ -416,7 +416,7 @@ void CalcOrbit(Object& obj)
 	else
 		obj.argOfPeriapsis = ((2 * PI) - acos(DotProduct(n, eccentVect) / (n.magnitude() * eccentVect.magnitude())));
 	obj.argOfPeriapsis = (obj.argOfPeriapsis * (180 / PI)); // convert to degree
-	obj.argOfPeriapsis -= 90; // convert to equator
+	//obj.argOfPeriapsis -= 90; // convert to equator
 
     // calculates obliquity
     StateVect tiltVect = RotateVector(obj.orientation, obj.angularVelocity);
@@ -426,7 +426,7 @@ void CalcOrbit(Object& obj)
 	// calculate mean anomaly
 	obj.meanAnomaly = (E - (obj.eccentricity * sin(E)));
 	obj.meanAnomaly = (obj.meanAnomaly * (180 / PI));
-	obj.meanAnomaly -= 90; // convert to equator
+	//obj.meanAnomaly -= 90; // convert to equator
 
 	return;
 }
@@ -961,7 +961,7 @@ void PrintFile(std::ofstream& f, Object & o)
 		<< "\n\t\tSemiMajorAxis\t" << o.semimajor
 		<< "\n\t\tPeriod\t\t\t" << o.period
 		<< "\n\t\tEccentricity\t" << o.eccentricity << "\t\t//This value will be incorrect for binary objects. Get the correct values from Universe Sandbox."
-		<< "\n\t\tInclination\t\t" << o.inclination
+		<< "\n\t\tInclination\t\t" << o.inclination << "\t\t//This value may not be correct. Compare to Universe Sandbox to make sure."
 		<< "\n\t\tAscendingNode\t" << o.longOfAscNode
 		<< "\n\t\tArgOfPericenter\t" << o.argOfPeriapsis
 		<< "\n\t\tMeanAnomaly\t\t" << o.meanAnomaly
