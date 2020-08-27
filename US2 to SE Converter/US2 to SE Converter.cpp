@@ -907,12 +907,12 @@ void PrintFile(std::ofstream& f, Object & o)
 
 	if (o.type != "Barycenter")
 	{
-		if (o.type != "Star")
+		if (o.class_ != "")
 			f << "\n\tClass\t\t\t\t\"" << o.class_ << "\"";
 		f << "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
 			<< "\n\tRadius\t\t\t\t" << o.radius
 			<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod
-			<< "\n\tObliquity:\t\t\t0.0\t\t\t\t//Change this value to the object's axial tilit in degrees!"; //<< o.obliquity;
+			<< "\n\tObliquity:\t\t\t0.0\t\t\t\t//Change this value to the object's axial tilit in degrees. Find this value in Universe Sandbox."; //<< o.obliquity;
 		if (o.type == "Star")
 			f << "\n\tLum\t\t\t\t\t" << o.luminosity
 			<< "\n\tTeff\t\t\t\t" << o.temp;
@@ -960,7 +960,7 @@ void PrintFile(std::ofstream& f, Object & o)
 		<< "\n\t\tRefPlane\t\t\"Equator\""
 		<< "\n\t\tSemiMajorAxis\t" << o.semimajor
 		<< "\n\t\tPeriod\t\t\t" << o.period
-		<< "\n\t\tEccentricity\t" << o.eccentricity << "\t\t//This value will be incorrect for binary objects."
+		<< "\n\t\tEccentricity\t" << o.eccentricity << "\t\t//This value will be incorrect for binary objects. Get the correct values from Universe Sandbox."
 		<< "\n\t\tInclination\t\t" << o.inclination
 		<< "\n\t\tAscendingNode\t" << o.longOfAscNode
 		<< "\n\t\tArgOfPericenter\t" << o.argOfPeriapsis
