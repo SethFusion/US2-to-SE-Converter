@@ -898,19 +898,17 @@ void PrintFile(std::ofstream& f, Object & o)
 			<< "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
 			<< "\n\tRadius\t\t\t\t" << o.radius
 			<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod
-            << "\n\tObliquity:\t\t" << o.obliquity
+            //<< "\n\tObliquity:\t\t" << o.obliquity		// single star systems with wrong obliquity have potential to break SE
 			<< "\n}\n\n";
 		for (int i = 0; i < o.child.size(); i++)
 			PrintFile(f, *o.child.at(i));
 		return;
 	}
 
-	if (o.type != "Barycenter")
+	if (o.type != "Barycenter" && o.type != "Star") // planets cannot use lum/teff
 		f << "\n\tClass\t\t\t\t\"" << o.class_ << "\""
 		<< "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
 		<< "\n\tRadius\t\t\t\t" << o.radius
-		<< "\n\tLum\t\t\t\t\t" << o.luminosity
-		<< "\n\tTeff\t\t\t\t" << o.temp
 		<< "\n\tAlbedoBond:\t\t\t" << o.albedo
 		<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod
 		<< "\n\tObliquity:\t\t\t" << o.obliquity
@@ -918,11 +916,44 @@ void PrintFile(std::ofstream& f, Object & o)
 		<< "\n\t{"
 		<< "\n\t\tHydrogen\t" << o.hydrogenMass
 		<< "\n\t\tHelium\t\t0"
-		<< "\n\t\t\tSilicates\t" << o.silicateMass
+		<< "\n\t\tSilicates\t" << o.silicateMass
 		<< "\n\t\tCarbides\t0"					// helium/carbide output added for the sake of the user
 		<< "\n\t\tIces\t\t" << o.waterMass
 		<< "\n\t\tMetals\t\t" << o.ironMass
 		<< "\n\t}";
+	else if (o.type == "Star") // stars do not need albedo/composition
+		f << "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
+		<< "\n\tRadius\t\t\t\t" << o.radius
+		<< "\n\tLum\t\t\t\t\t" << o.luminosity
+		<< "\n\tTeff\t\t\t\t" << o.temp
+		<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod
+		<< "\n\tObliquity:\t\t\t" << o.obliquity;
+
+	if (o.type != "Barycenter" && o.hydrogenMass < 0.01)
+	{
+		f << "\n\n\tSurface"
+			<< "\n\t{"
+			<< "\n\t\tBumpHeight\t\t" << o.roughness;
+
+		o.depth = -1;
+		if (o.depth > 0)
+			f << "\n\t\tBumpOffset\t\t" << o.depth
+			<< "\n\t}"
+			<< "\n\n\tOcean"
+			<< "\n\t{"
+			<< "\n\t\tDepth\t\t\t" << o.depth
+			<< "\n\t\tComposition"
+			<< "\n\t\t{"
+			<< "\n\t\t\tH2O\t\t" << "100"
+			<< "\n\t\t}";
+
+		f << "\n\t}"
+			<< "\n\n\tAtmosphere"
+			<< "\n\t{"
+			<< "\n\t\tPressure\t\t" << o.surfacePressure
+			<< "\n\t\tGreenhouse\t\t" << o.greenhouse
+			<< "\n\t}";
+	}
 
 	f << "\n\n\tOrbit"
 		<< "\n\t{"
@@ -935,31 +966,6 @@ void PrintFile(std::ofstream& f, Object & o)
 		<< "\n\t\tArgOfPericenter\t" << o.argOfPeriapsis
 		<< "\n\t\tMeanAnomaly\t\t" << o.meanAnomaly
 		<< "\n\t}";
-
-	if (o.type != "Barycenter" && o.hydrogenMass < 0.01)
-    {
-		f << "\n\n\tSurface"
-		<< "\n\t{"
-		<< "\n\t\tBumpHeight\t\t" << o.roughness;
-
-		if (o.depth > 0)
-            f << "\n\t\tBumpOffset\t\t" << o.depth
-            << "\n\t}"
-            << "\n\n\tOcean"
-            << "\n\t{"
-            << "\n\t\tDepth\t\t\t" << o.depth
-            << "\n\t\tComposition"
-            << "\n\t\t{"
-            << "\n\t\t\tH2O\t\t" << "100"
-            << "\n\t\t}";
-
-		f << "\n\t}"
-        << "\n\n\tAtmosphere"
-		<< "\n\t{"
-		<< "\n\t\tPressure\t\t" << o.surfacePressure
-		<< "\n\t\tGreenhouse\t\t" << o.greenhouse
-		<< "\n\t}";
-    }
 
 	f << "\n}\n\n";
 
