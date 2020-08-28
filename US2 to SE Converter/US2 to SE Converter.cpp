@@ -893,12 +893,12 @@ void PrintFile(std::ofstream& f, Object & o)
 	else if (&o == root && o.type == "Star")
 	{
 		f << "\n\tClass\t\t\t\t\"" << o.class_ << "\""
-            << "\n\tLum\t\t\t\t\t" << o.luminosity
+			<< "\n\tLum\t\t\t\t\t" << o.luminosity
 			<< "\n\tTeff\t\t\t\t" << o.temp
 			<< "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
 			<< "\n\tRadius\t\t\t\t" << o.radius
 			<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod
-            //<< "\n\tObliquity:\t\t" << o.obliquity		// single star systems with wrong obliquity have potential to break SE
+			<< "\n\tObliquity:\t\t\t" << o.obliquity << "\t\t// This value may not be correct. Compare to Universe Sandbox to make sure."
 			<< "\n}\n\n";
 		for (int i = 0; i < o.child.size(); i++)
 			PrintFile(f, *o.child.at(i));
@@ -907,48 +907,50 @@ void PrintFile(std::ofstream& f, Object & o)
 
 	if (o.type != "Barycenter")
 	{
-		if (o.class_ != "")
-			f << "\n\tClass\t\t\t\t\"" << o.class_ << "\"";
-		f << "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
+		f << "\n\tClass\t\t\t\t\"" << o.class_ << "\"" // classifier doesn't return without assigning a class
+			<< "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
 			<< "\n\tRadius\t\t\t\t" << o.radius
 			<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod
-			<< "\n\tObliquity:\t\t\t0.0\t\t\t\t//Change this value to the object's axial tilit in degrees. Find this value in Universe Sandbox."; //<< o.obliquity;
+			<< "\n\tObliquity:\t\t\t" << o.obliquity << "\t\t// This value may not be correct. Compare to Universe Sandbox to make sure.";
 		if (o.type == "Star")
 			f << "\n\tLum\t\t\t\t\t" << o.luminosity
-			<< "\n\tTeff\t\t\t\t" << o.temp;
+				<< "\n\tTeff\t\t\t\t" << o.temp;
 		else
 			f << "\n\tAlbedoBond:\t\t\t" << o.albedo
-			<< "\n\n\tComposition"
-			<< "\n\t{"
-			<< "\n\t\tHydrogen\t" << o.hydrogenMass
-			<< "\n\t\tHelium\t\t0"
-			<< "\n\t\tSilicates\t" << o.silicateMass
-			<< "\n\t\tCarbides\t0"					// helium/carbide output added for the sake of the user
-			<< "\n\t\tIces\t\t" << o.waterMass
-			<< "\n\t\tMetals\t\t" << o.ironMass
-			<< "\n\t}";
+				<< "\n\n\tComposition"
+				<< "\n\t{"
+				<< "\n\t\tHydrogen\t" << o.hydrogenMass
+				<< "\n\t\tHelium\t\t0"
+				<< "\n\t\tSilicates\t" << o.silicateMass
+				<< "\n\t\tCarbides\t0"					// helium/carbide output added for the sake of the user
+				<< "\n\t\tIces\t\t" << o.waterMass
+				<< "\n\t\tMetals\t\t" << o.ironMass
+				<< "\n\t}";
 	}
 
 	if (o.type != "Barycenter" && o.hydrogenMass < 0.01)
 	{
-		f << "\n\n\tSurface"
-			<< "\n\t{"
-			<< "\n\t\tBumpHeight\t\t" << o.roughness;
+		if (o.depth < o.roughness)
+		{
+			f << "\n\n\tSurface"
+				<< "\n\t{"
+				<< "\n\t\tBumpHeight\t\t" << o.roughness;
+			if (o.depth > 0)
+				f << "\n\t\tBumpOffset\t\t" << o.depth;
+			f << "\n\t}";
+		}
 
-		o.depth = -1;
 		if (o.depth > 0)
-			f << "\n\t\tBumpOffset\t\t" << o.depth
-			<< "\n\t}"
-			<< "\n\n\tOcean"
-			<< "\n\t{"
-			<< "\n\t\tDepth\t\t\t" << o.depth
-			<< "\n\t\tComposition"
-			<< "\n\t\t{"
-			<< "\n\t\t\tH2O\t\t" << "100"
-			<< "\n\t\t}";
+			f << "\n\n\tOcean"
+				<< "\n\t{"
+				<< "\n\t\tDepth\t\t\t" << o.depth
+				<< "\n\t\tComposition"
+				<< "\n\t\t{"
+				<< "\n\t\t\tH2O\t\t" << "100"
+				<< "\n\t\t}"
+				<< "\n\t}";
 
-		f << "\n\t}"
-			<< "\n\n\tAtmosphere"
+		f << "\n\n\tAtmosphere"
 			<< "\n\t{"
 			<< "\n\t\tPressure\t\t" << o.surfacePressure
 			<< "\n\t\tGreenhouse\t\t" << o.greenhouse
@@ -960,11 +962,12 @@ void PrintFile(std::ofstream& f, Object & o)
 		<< "\n\t\tRefPlane\t\t\"Equator\""
 		<< "\n\t\tSemiMajorAxis\t" << o.semimajor
 		<< "\n\t\tPeriod\t\t\t" << o.period
-		<< "\n\t\tEccentricity\t" << o.eccentricity << "\t\t//This value will be incorrect for binary objects. Get the correct values from Universe Sandbox."
-		<< "\n\t\tInclination\t\t" << o.inclination << "\t\t//This value may not be correct. Compare to Universe Sandbox to make sure."
-		<< "\n\t\tAscendingNode\t" << o.longOfAscNode
-		<< "\n\t\tArgOfPericenter\t" << o.argOfPeriapsis
-		<< "\n\t\tMeanAnomaly\t\t" << o.meanAnomaly
+		<< "\n\t\tEccentricity\t" << o.eccentricity << "\t\t// This value will be incorrect for binary objects. Estimate it manually."
+		// In Universe Sandbox the eccentricity of binaries fluctuates, because there's no barycenters and they switch parent instead
+		<< "\n\t\tInclination\t\t" << o.inclination << "\t\t// This value may not be correct. Compare to Universe Sandbox to make sure."
+		<< "\n\t\tAscendingNode\t" << o.longOfAscNode << "\t\t// This value may not be correct. Compare to Universe Sandbox to make sure."
+		<< "\n\t\tArgOfPericenter\t" << o.argOfPeriapsis << "\t\t// This value may not be correct. Compare to Universe Sandbox to make sure."
+		<< "\n\t\tMeanAnomaly\t\t" << o.meanAnomaly << "\t\t// This value may not be correct. Compare to Universe Sandbox to make sure."
 		<< "\n\t}";
 
 	f << "\n}\n\n";
