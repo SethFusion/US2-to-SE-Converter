@@ -907,8 +907,9 @@ void PrintFile(std::ofstream& f, Object & o)
 
 	if (o.type != "Barycenter")
 	{
-		f << "\n\tClass\t\t\t\t\"" << o.class_ << "\"" // classifier doesn't return without assigning a class
-			<< "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
+		if (o.class_ != "")
+			f << "\n\tClass\t\t\t\t\"" << o.class_ << "\"";
+		f << "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
 			<< "\n\tRadius\t\t\t\t" << o.radius
 			<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod
 			<< "\n\tObliquity:\t\t\t" << o.obliquity << "\t\t// This value may not be correct. Compare to Universe Sandbox to make sure.";
