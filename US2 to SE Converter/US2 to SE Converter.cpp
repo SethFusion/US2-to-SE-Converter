@@ -78,7 +78,7 @@ std::vector<Object> object;
 Object* root;
 
 double G; // gravitation constant
-const double PI = 3.1415926535; // it's pi you idiot
+const double PI = 3.141592653589793; // it's pi you idiot
 
 void GetData(std::ifstream&);
 void BuildHierarchy(std::list<Object>&, std::list<Object>::iterator&);
@@ -101,6 +101,7 @@ double Determinate(std::vector<double>&);
 StateVect Subtract(StateVect&, StateVect&);
 StateVect Add(StateVect&, StateVect&);
 StateVect Normalize(StateVect&);
+double To_Degree(double&);
 
 int main()
 {
@@ -378,7 +379,6 @@ void CalcOrbit(Object& obj)
 
 	// calculate inclination
 	obj.inclination = (acos(momentVect.z / momentVect.magnitude()));
-	obj.inclination = (obj.inclination * (180 / PI));
 
 	// calculate eccentricity vector and eccentricity
 	StateVect eccentVect, VcrossH = CrossProduct(obj.velocity, momentVect);
@@ -402,26 +402,23 @@ void CalcOrbit(Object& obj)
 		obj.longOfAscNode = (acos(n.x / n.magnitude()));
 	else
 		obj.longOfAscNode = ( (2 * PI) - acos(n.x / n.magnitude()));
-	obj.longOfAscNode = (obj.longOfAscNode * (180 / PI));
 
 	// calculate argOfPeriapsis
 	if (eccentVect.z >= 0.0)
 		obj.argOfPeriapsis = (acos(DotProduct(n, eccentVect) / (n.magnitude() * eccentVect.magnitude())));
 	else
 		obj.argOfPeriapsis = ((2 * PI) - acos(DotProduct(n, eccentVect) / (n.magnitude() * eccentVect.magnitude())));
-	obj.argOfPeriapsis = (obj.argOfPeriapsis * (180 / PI)); // convert to degree
 
 	// calculate eccentric anomaly
 	double E = (2 * atan((tan(Tanomaly / 2)) / (sqrt((1 + obj.eccentricity) / (1 - obj.eccentricity)))));
 
 	// calculate mean anomaly
 	obj.meanAnomaly = (E - (obj.eccentricity * sin(E)));
-	obj.meanAnomaly = (obj.meanAnomaly * (180 / PI));
 
 	// calculates obliquity
 	StateVect tiltVect = RotateVector(obj.orientation, obj.angularVelocity);
 	obj.obliquity = acos(DotProduct(tiltVect, momentVect) / (tiltVect.magnitude() * momentVect.magnitude()));
-	obj.obliquity = abs(180 - ((obj.obliquity * (180 / PI))));
+	obj.obliquity = abs(180 - To_Degree(obj.obliquity));
 
 	return;
 }
@@ -570,6 +567,11 @@ StateVect Normalize(StateVect& a)
 	temp.y = a.y / mag;
 	temp.z = a.z / mag;
 	return temp;
+}
+
+double To_Degree(double& number)
+{
+	return (number * (180 / PI));
 }
 
 void GetData(std::ifstream& inputFile)
@@ -960,10 +962,10 @@ void PrintFile(std::ofstream& f, Object & o)
 		<< "\n\t\tPeriod\t\t\t" << o.period
 		<< "\n\t\tEccentricity\t" << o.eccentricity << "\t\t// This value will be incorrect for binary objects. Estimate it manually."
 		// In Universe Sandbox the eccentricity of binaries fluctuates, because there's no barycenters and they switch parent instead
-		<< "\n\t\tInclination\t\t" << o.inclination << "\t\t// This value may not be correct. Compare to Universe Sandbox to make sure."
-		<< "\n\t\tAscendingNode\t" << o.longOfAscNode << "\t\t// This value may not be correct. Compare to Universe Sandbox to make sure."
-		<< "\n\t\tArgOfPericenter\t" << o.argOfPeriapsis << "\t\t// This value may not be correct. Compare to Universe Sandbox to make sure."
-		<< "\n\t\tMeanAnomaly\t\t" << o.meanAnomaly << "\t\t// This value may not be correct. Compare to Universe Sandbox to make sure."
+		<< "\n\t\tInclination\t\t" << To_Degree(o.inclination)
+		<< "\n\t\tAscendingNode\t" << To_Degree(o.longOfAscNode) << "\t\t// This value may not be correct. Compare to Universe Sandbox to make sure."
+		<< "\n\t\tArgOfPericenter\t" << To_Degree(o.argOfPeriapsis) << "\t\t// This value may not be correct. Compare to Universe Sandbox to make sure."
+		<< "\n\t\tMeanAnomaly\t\t" << To_Degree(o.meanAnomaly)
 		<< "\n\t}";
 
 	f << "\n}\n\n";
