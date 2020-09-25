@@ -387,10 +387,6 @@ void CalcOrbit(Object& obj)
 	eccentVect.z = ((VcrossH.z / mu) - (obj.position.z / obj.position.magnitude()));
 	obj.eccentricity = eccentVect.magnitude();
 
-	// calculate vector n / for ascending node
-	StateVect one(0.0, 0.0, 1.0), two(momentVect.y * -1.0, momentVect.x, 0.0);
-	StateVect n = CrossProduct(one, two);
-
 	// calculate true anomaly
 	double Tanomaly;
 	if (DotProduct(obj.position, obj.velocity) >= 0.0)
@@ -398,8 +394,8 @@ void CalcOrbit(Object& obj)
 	else
 		Tanomaly = ((2 * PI) - acos(DotProduct(eccentVect, obj.position) / (eccentVect.magnitude() * obj.position.magnitude())));
 
-	// calculate eccentric anomaly
-	double E = (2 * atan( (tan(Tanomaly / 2)) / (sqrt((1 + obj.eccentricity) / (1 - obj.eccentricity)) )));
+	// calculate vector n / for ascending node
+	StateVect n(momentVect.y * -1.0, momentVect.x, 0.0);
 
 	// calculate long of Ascending Node
 	if (n.y >= 0.0)
@@ -415,14 +411,17 @@ void CalcOrbit(Object& obj)
 		obj.argOfPeriapsis = ((2 * PI) - acos(DotProduct(n, eccentVect) / (n.magnitude() * eccentVect.magnitude())));
 	obj.argOfPeriapsis = (obj.argOfPeriapsis * (180 / PI)); // convert to degree
 
-    // calculates obliquity
-    StateVect tiltVect = RotateVector(obj.orientation, obj.angularVelocity);
-	obj.obliquity = acos( DotProduct(tiltVect, momentVect) / (tiltVect.magnitude() * momentVect.magnitude()) );
-	obj.obliquity = abs(180 - ((obj.obliquity * (180 / PI))));
+	// calculate eccentric anomaly
+	double E = (2 * atan((tan(Tanomaly / 2)) / (sqrt((1 + obj.eccentricity) / (1 - obj.eccentricity)))));
 
 	// calculate mean anomaly
 	obj.meanAnomaly = (E - (obj.eccentricity * sin(E)));
 	obj.meanAnomaly = (obj.meanAnomaly * (180 / PI));
+
+	// calculates obliquity
+	StateVect tiltVect = RotateVector(obj.orientation, obj.angularVelocity);
+	obj.obliquity = acos(DotProduct(tiltVect, momentVect) / (tiltVect.magnitude() * momentVect.magnitude()));
+	obj.obliquity = abs(180 - ((obj.obliquity * (180 / PI))));
 
 	return;
 }
