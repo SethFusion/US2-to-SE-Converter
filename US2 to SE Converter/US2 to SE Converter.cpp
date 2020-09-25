@@ -379,7 +379,6 @@ void CalcOrbit(Object& obj)
 	// calculate inclination
 	obj.inclination = (acos(momentVect.z / momentVect.magnitude()));
 	obj.inclination = (obj.inclination * (180 / PI));
-	//obj.inclination -= 90; // convert to equator
 
 	// calculate eccentricity vector and eccentricity
 	StateVect eccentVect, VcrossH = CrossProduct(obj.velocity, momentVect);
@@ -408,7 +407,6 @@ void CalcOrbit(Object& obj)
 	else
 		obj.longOfAscNode = ( (2 * PI) - acos(n.x / n.magnitude()));
 	obj.longOfAscNode = (obj.longOfAscNode * (180 / PI));
-	//obj.longOfAscNode -= 90; // convert to equator
 
 	// calculate argOfPeriapsis
 	if (eccentVect.z >= 0.0)
@@ -416,7 +414,6 @@ void CalcOrbit(Object& obj)
 	else
 		obj.argOfPeriapsis = ((2 * PI) - acos(DotProduct(n, eccentVect) / (n.magnitude() * eccentVect.magnitude())));
 	obj.argOfPeriapsis = (obj.argOfPeriapsis * (180 / PI)); // convert to degree
-	//obj.argOfPeriapsis -= 90; // convert to equator
 
     // calculates obliquity
     StateVect tiltVect = RotateVector(obj.orientation, obj.angularVelocity);
@@ -426,7 +423,6 @@ void CalcOrbit(Object& obj)
 	// calculate mean anomaly
 	obj.meanAnomaly = (E - (obj.eccentricity * sin(E)));
 	obj.meanAnomaly = (obj.meanAnomaly * (180 / PI));
-	//obj.meanAnomaly -= 90; // convert to equator
 
 	return;
 }
@@ -757,8 +753,8 @@ void GetData(std::ifstream& inputFile)
 		z = y.substr(y.find(";"));
 		z.erase(0, 1);
 		temp.position.x = std::stod(holder, &sz); // x
-		temp.position.y = std::stod(y, &sz); // y
-		temp.position.z = std::stod(z, &sz); // z
+		temp.position.z = std::stod(y, &sz); // y
+		temp.position.y = std::stod(z, &sz); // z
 
 		// find velocity and add x y z to vector
 		while (inputFile >> holder && !(holder.find("\"Velocity\":") + 1));
@@ -768,8 +764,8 @@ void GetData(std::ifstream& inputFile)
 		z = y.substr(y.find(";"));
 		z.erase(0, 1);
 		temp.velocity.x = std::stod(holder, &sz); // x
-		temp.velocity.y = std::stod(y, &sz); // y
-		temp.velocity.z = std::stod(z, &sz); // z
+		temp.velocity.z = std::stod(y, &sz); // y
+		temp.velocity.y = std::stod(z, &sz); // z
 
 		// find category
 		while (inputFile >> holder && !(holder.find("\"Category\":") + 1));
@@ -898,7 +894,7 @@ void PrintFile(std::ofstream& f, Object & o)
 			<< "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
 			<< "\n\tRadius\t\t\t\t" << o.radius
 			<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod
-			<< "\n\tObliquity:\t\t\t" << o.obliquity << "\t\t// This value may not be correct. Compare to Universe Sandbox to make sure."
+			<< "\n\tObliquity:\t\t\t" << ((o.obliquity < -180) ? 0.0 : o.obliquity) << "\t\t// This value may not be correct. Compare to Universe Sandbox to make sure."
 			<< "\n}\n\n";
 		for (int i = 0; i < o.child.size(); i++)
 			PrintFile(f, *o.child.at(i));
