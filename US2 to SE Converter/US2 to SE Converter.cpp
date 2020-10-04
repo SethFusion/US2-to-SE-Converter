@@ -15,16 +15,6 @@
 // In solar-mass, earth-mass & AU units, the PI discriminant constant K = 807.
 // But we use kg, kg, AU instead, so our constant = K*pow(solar-mass, 5.0/2.0)/earth-mass = 7.53445e53
 
-/*
-	Listen here...
-
-	Before you start judging this code for how ugly it is, just remember that I'm no physics major and
-	this shit really took it out of me. Yeah, there are probably some optimizations this garbage could
-	use. In fact I know there are parts of this I only wrote for testing, and then left in because it
-	actually worked. I'll even say this: it is the ugliest program I've ever written. But you know what?
-	It gets the job done, for the general case, and that's all I need it to do.
-*/
-
 class StateVect
 {
 public:
@@ -77,8 +67,8 @@ std::string::size_type sz;
 std::vector<Object> object;
 Object* root;
 
-double G; // gravitation constant
-const double PI = 3.141592653589793; // it's pi you idiot
+double G; // gravitation constant imported from Universe Sandbox
+const double PI = 3.141592653589793;
 
 void GetData(std::ifstream&);
 void BuildHierarchy(std::list<Object>&, std::list<Object>::iterator&);
