@@ -352,6 +352,10 @@ void UpdateBinary(Object& bin, Object& A, Object& B)
 
 void CalcOrbit(Object& obj)
 {
+	/* The function starts with the bottom-most object of the hierarchy and works its way to the top. 
+		mu is set manually for each object depending on the parent. Then, the object position and velocity
+		subtract that of the parent's to center the object around it's parent. Then it uses those values with
+		the functions from the paper. The only objects this does not work for are binary objects. */
 	for (int i = 0; i < obj.child.size(); i++)
 		CalcOrbit(*obj.child.at(i));
 
