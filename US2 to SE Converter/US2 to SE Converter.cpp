@@ -88,7 +88,6 @@ double Distance(Object&, Object&);
 StateVect CrossProduct(StateVect&, StateVect&);
 double DotProduct(StateVect&, StateVect&);
 StateVect Scale(double, StateVect&);
-double Determinate(std::vector<double>&);
 StateVect Subtract(StateVect&, StateVect&);
 StateVect Add(StateVect&, StateVect&);
 StateVect Normalize(StateVect&);
@@ -412,9 +411,7 @@ void CalcOrbit(Object& obj)
 		Tanomaly = ((2 * PI) - acos(DotProduct(eccentVect, obj.position) / (eccentVect.magnitude() * obj.position.magnitude())));
 
 	// calculate vector n / for ascending node
-	//StateVect n(momentVect.y * -1.0, momentVect.x, 0.0);
-	StateVect K(0, 0, 1), n;
-	n = CrossProduct(K, momentVect);
+	StateVect K(0, 0, 1), n = CrossProduct(K, momentVect);
 
 	// calculate long of Ascending Node
 	if (n.y >= 0.0)
@@ -434,25 +431,46 @@ void CalcOrbit(Object& obj)
 	// calculate mean anomaly
 	obj.meanAnomaly = (E - (obj.eccentricity * sin(E)));
 
+	/*
+		Obliquity doesn't work and I don't know how to fix it
+
+		If YOU know how to fix it, send me a message and we will figure it out. 
+		Here is the problem:
+
+		Orietnation from the simulation file is represented as four numbers, I assume
+		to be a quaternion of the form r, i, j, k. It looks something like this:
+		"Orientation":"-0.03764766;-0.8111074;-0.03670029;0.5811343",
+
+		Those four numbers need to be turnned into obliquity relative to the
+		orbital plane somehow. I was using this pseudo-code from the US team
+		to get an idea:
+
+			up = orbitnormal
+			rotationaxis = normalize(AngularVelocity)
+			degree = 180 / PI
+			world = normalize(rotationaxis * Orientation)
+			obliquity = (PI - acos(dot(up, world))) * degree
+
+		The problem is, I don't know if I am reading it correctly as I have
+		no clue what to do for Orientation being a quaternion. Does
+		rotationaxis scale orientation? Does orientation need to be
+		in euler angles first? idk and honestly idc anymore
+
+		If you can read that pseudo-code and know how to slove this, 
+		please tell me and we will get obliquity working!
+	*/
 	// calculates obliquity
-	StateVect orbitNormal(sin(obj.longOfAscNode) * sin(obj.inclination), -1 * cos(obj.longOfAscNode) * sin(obj.inclination), cos(obj.inclination));
+	StateVect orbitNormal = Normalize(momentVect);
 	StateVect rotationAxis = Normalize(obj.angularVelocity);
 	StateVect orientation = To_EulerAngles(obj.orientation);
 	StateVect world = Scale(rotationAxis.magnitude(), orientation);
 	world = Normalize(world);
-	obj.obliquity = (PI - acos(DotProduct(momentVect, world)));
+	obj.obliquity = (PI - acos(DotProduct(orbitNormal, world)));
 	obj.obliquity = To_Degree(obj.obliquity);
 
-
-
-
-
-
-
-
-	StateVect tiltVect = RotateVector(obj.orientation, obj.angularVelocity);
-	obj.obliquity = acos(DotProduct(tiltVect, momentVect) / (tiltVect.magnitude() * momentVect.magnitude()));
-	obj.obliquity = abs(180 - To_Degree(obj.obliquity));
+	//StateVect tiltVect = RotateVector(obj.orientation, obj.angularVelocity);
+	//obj.obliquity = acos(DotProduct(tiltVect, momentVect) / (tiltVect.magnitude() * momentVect.magnitude()));
+	//obj.obliquity = abs(180 - To_Degree(obj.obliquity));
 
 	return;
 }
@@ -500,11 +518,6 @@ bool ClearanceCheck(Object& obj)
 		return ( K_KGKGAU * (obj.mass / (pow(obj.parent->mass, 5.0/2.0) * pow(obj.semimajor, 9.0/8.0))) > 1 );
 }
 
-
-
-
-
-
 StateVect To_EulerAngles(Quaternion q) {
 	StateVect angles;
 
@@ -527,14 +540,6 @@ StateVect To_EulerAngles(Quaternion q) {
 
 	return angles;
 }
-
-
-
-
-
-
-
-
 
 // rotate vector based on a quaternion's rotation matrix
 StateVect RotateVector(Quaternion& q, StateVect& vect)
@@ -569,26 +574,9 @@ double Distance(Object& A, Object& B)
 StateVect CrossProduct(StateVect& A, StateVect& B)
 {
 	StateVect cross;
-	std::vector<double> i, j, k;
-
-	i.push_back(A.y);
-	i.push_back(A.z);
-	i.push_back(B.y);
-	i.push_back(B.z);
-
-	j.push_back(A.x);
-	j.push_back(A.z);
-	j.push_back(B.x);
-	j.push_back(B.z);
-
-	k.push_back(A.x);
-	k.push_back(A.y);
-	k.push_back(B.x);
-	k.push_back(B.y);
-
-	cross.x = Determinate(i);
-	cross.y = (Determinate(j) * -1.0);
-	cross.z = Determinate(k);
+	cross.x = ((A.y * B.z) - (B.y * A.z));
+	cross.y = ((A.x * B.z) - (B.x * A.z));
+	cross.z = ((A.x * B.y) - (B.x * A.y));
 	return cross;
 }
 
@@ -604,11 +592,6 @@ StateVect Scale(double scaler, StateVect& A)
 	temp.y = A.y * scaler;
 	temp.z = A.z * scaler;
 	return temp;
-}
-
-double Determinate(std::vector<double>& vect)
-{
-	return ((vect.at(0) * vect.at(3)) - (vect.at(1) * vect.at(2)));
 }
 
 StateVect Subtract(StateVect& A, StateVect& B)
