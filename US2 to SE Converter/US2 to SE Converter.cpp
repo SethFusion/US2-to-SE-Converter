@@ -33,6 +33,25 @@ public:
 	}
 };
 
+class Color
+{
+public:
+	double r, g, b, a;
+
+	Color(double x = -1.0, double y = 0.0, double z = 0.0, double w = 0.0)
+	{
+		r = x;
+		g = y;
+		b = z;
+		a = w;
+	}
+
+	std::string Print()
+	{
+		return ("(" + std::to_string(r) + ", " + std::to_string(g) +", " + std::to_string(b) + ", " + std::to_string(a) + ")");
+	}
+};
+
 struct Quaternion
 {
 	double w, x, y, z;
@@ -59,6 +78,11 @@ struct Object
 	// used for stars
 	bool isStar;
 	double luminosity;
+
+	// color stuff
+	Color colorBeach, colorLowland, colorUpland; // for rocky planets
+	Color colorLayer0, colorLayer1, colorLayer2, colorLayer3, colorLayer4, colorLayer5, colorLayer6, colorLayer7; // for gass giants
+	Color atmosphere;
 
 	// in hydrostatic equilibrium?
 	bool isRound;
@@ -437,11 +461,11 @@ void CalcOrbit(Object& obj)
 		If YOU know how to fix it, send me a message and we will figure it out. 
 		Here is the problem:
 
-		Orietnation from the simulation file is represented as four numbers, I assume
+		Orientation from the simulation file is represented as four numbers, I assume
 		to be a quaternion of the form r, i, j, k. It looks something like this:
 		"Orientation":"-0.03764766;-0.8111074;-0.03670029;0.5811343",
 
-		Those four numbers need to be turnned into obliquity relative to the
+		Those four numbers need to be turned into obliquity relative to the
 		orbital plane somehow. I was using this pseudo-code from the US team
 		to get an idea:
 
@@ -575,7 +599,7 @@ StateVect CrossProduct(StateVect& A, StateVect& B)
 {
 	StateVect cross;
 	cross.x = ((A.y * B.z) - (B.y * A.z));
-	cross.y = ((A.x * B.z) - (B.x * A.z));
+	cross.y = ((A.z * B.x) - (B.z * A.x));
 	cross.z = ((A.x * B.y) - (B.x * A.y));
 	return cross;
 }
@@ -689,6 +713,144 @@ void GetData(std::ifstream& inputFile)
 		holder.erase(0, 13);
 		temp.luminosity = std::stod(holder, &sz);
 		temp.luminosity /= 3.827e26; // converts watts to solar lum
+
+		// find color stuff
+		while (inputFile >> holder && !(holder.find("\"Colors\":[") + 1));
+		if (inputFile >> holder && holder != "],") // object uses low/mid/high colors
+		{
+			holder.erase(0, 6);
+			temp.colorUpland.r = std::stod(holder, &sz);
+			inputFile >> holder;
+			temp.colorUpland.g = std::stod(holder, &sz);
+			inputFile >> holder;
+			temp.colorUpland.b = std::stod(holder, &sz);
+			inputFile >> holder;
+			temp.colorUpland.a = std::stod(holder, &sz);
+
+			holder.erase(0, 14);
+			temp.colorLowland.r = std::stod(holder, &sz);
+			inputFile >> holder;
+			temp.colorLowland.g = std::stod(holder, &sz);
+			inputFile >> holder;
+			temp.colorLowland.b = std::stod(holder, &sz);
+			inputFile >> holder;
+			temp.colorLowland.a = std::stod(holder, &sz);
+
+			holder.erase(0, 14);
+			temp.colorBeach.r = std::stod(holder, &sz);
+			inputFile >> holder;
+			temp.colorBeach.g = std::stod(holder, &sz);
+			inputFile >> holder;
+			temp.colorBeach.b = std::stod(holder, &sz);
+			inputFile >> holder;
+			temp.colorBeach.a = std::stod(holder, &sz);	
+		}
+		else // object has no colors or uses color layers
+		{
+			while (inputFile >> holder && !(holder.find("\"Colors\":[") + 1));
+			if (inputFile >> holder && holder != "],") // object uses color layers
+			{
+				holder.erase(0, 6);
+				temp.colorLayer0.r = std::stod(holder, &sz);
+				inputFile >> holder;
+				temp.colorLayer0.g = std::stod(holder, &sz);
+				inputFile >> holder;
+				temp.colorLayer0.b = std::stod(holder, &sz);
+				inputFile >> holder;
+				temp.colorLayer0.a = std::stod(holder, &sz);
+				holder.erase(0, 7);
+
+				if (holder != "],")
+				{
+					holder.erase(0, 7);
+					temp.colorLayer1.r = std::stod(holder, &sz);
+					inputFile >> holder;
+					temp.colorLayer1.g = std::stod(holder, &sz);
+					inputFile >> holder;
+					temp.colorLayer1.b = std::stod(holder, &sz);
+					inputFile >> holder;
+					temp.colorLayer1.a = std::stod(holder, &sz);
+					holder.erase(0, 7);
+
+					if (holder != "],")
+					{
+						holder.erase(0, 7);
+						temp.colorLayer2.r = std::stod(holder, &sz);
+						inputFile >> holder;
+						temp.colorLayer2.g = std::stod(holder, &sz);
+						inputFile >> holder;
+						temp.colorLayer2.b = std::stod(holder, &sz);
+						inputFile >> holder;
+						temp.colorLayer2.a = std::stod(holder, &sz);
+						holder.erase(0, 7);
+
+						if (holder != "],")
+						{
+							holder.erase(0, 7);
+							temp.colorLayer3.r = std::stod(holder, &sz);
+							inputFile >> holder;
+							temp.colorLayer3.g = std::stod(holder, &sz);
+							inputFile >> holder;
+							temp.colorLayer3.b = std::stod(holder, &sz);
+							inputFile >> holder;
+							temp.colorLayer3.a = std::stod(holder, &sz);
+							holder.erase(0, 7);
+
+							if (holder != "],")
+							{
+								holder.erase(0, 7);
+								temp.colorLayer4.r = std::stod(holder, &sz);
+								inputFile >> holder;
+								temp.colorLayer4.g = std::stod(holder, &sz);
+								inputFile >> holder;
+								temp.colorLayer4.b = std::stod(holder, &sz);
+								inputFile >> holder;
+								temp.colorLayer4.a = std::stod(holder, &sz);
+								holder.erase(0, 7);
+
+								if (holder != "],")
+								{
+									holder.erase(0, 7);
+									temp.colorLayer5.r = std::stod(holder, &sz);
+									inputFile >> holder;
+									temp.colorLayer5.g = std::stod(holder, &sz);
+									inputFile >> holder;
+									temp.colorLayer5.b = std::stod(holder, &sz);
+									inputFile >> holder;
+									temp.colorLayer5.a = std::stod(holder, &sz);
+									holder.erase(0, 7);
+
+									if (holder != "],")
+									{
+										holder.erase(0, 7);
+										temp.colorLayer6.r = std::stod(holder, &sz);
+										inputFile >> holder;
+										temp.colorLayer6.g = std::stod(holder, &sz);
+										inputFile >> holder;
+										temp.colorLayer6.b = std::stod(holder, &sz);
+										inputFile >> holder;
+										temp.colorLayer6.a = std::stod(holder, &sz);
+										holder.erase(0, 7);
+
+										if (holder != "],")
+										{
+											holder.erase(0, 7);
+											temp.colorLayer7.r = std::stod(holder, &sz);
+											inputFile >> holder;
+											temp.colorLayer7.g = std::stod(holder, &sz);
+											inputFile >> holder;
+											temp.colorLayer7.b = std::stod(holder, &sz);
+											inputFile >> holder;
+											temp.colorLayer7.a = std::stod(holder, &sz);
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
 
 		// Find mass composition, if it exists
 		while (inputFile >> holder &&
@@ -919,8 +1081,8 @@ void PrintFile(std::ofstream& f, Object & o)
 			<< "\n\tTeff\t\t\t\t" << o.temp
 			<< "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
 			<< "\n\tRadius\t\t\t\t" << o.radius
-			<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod
-			<< "\n\tObliquity:\t\t\t" << ((o.obliquity < -180) ? 0.0 : o.obliquity)
+			<< "\n\tRotationPeriod\t\t" << o.rotationPeriod
+			<< "\n\tObliquity\t\t\t" << ((o.obliquity < -180) ? 0.0 : o.obliquity)
 			<< "\n}\n\n";
 		for (int i = 0; i < o.child.size(); i++)
 			PrintFile(f, *o.child.at(i));
@@ -933,13 +1095,14 @@ void PrintFile(std::ofstream& f, Object & o)
 			f << "\n\tClass\t\t\t\t\"" << o.class_ << "\"";
 		f << "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
 			<< "\n\tRadius\t\t\t\t" << o.radius
-			<< "\n\tRotationPeriod:\t\t" << o.rotationPeriod
-			<< "\n\tObliquity:\t\t\t" << o.obliquity;
+			<< "\n\tRotationPeriod\t\t" << o.rotationPeriod
+			<< "\n\tObliquity\t\t\t" << o.obliquity;
 		if (o.type == "Star")
 			f << "\n\tLum\t\t\t\t\t" << o.luminosity
 				<< "\n\tTeff\t\t\t\t" << o.temp;
 		else
-			f << "\n\tAlbedoBond:\t\t\t" << o.albedo
+		{
+			f << "\n\tAlbedoBond\t\t\t" << o.albedo
 				<< "\n\n\tComposition"
 				<< "\n\t{"
 				<< "\n\t\tHydrogen\t" << o.hydrogenMass
@@ -949,6 +1112,51 @@ void PrintFile(std::ofstream& f, Object & o)
 				<< "\n\t\tIces\t\t" << o.waterMass
 				<< "\n\t\tMetals\t\t" << o.ironMass
 				<< "\n\t}";
+
+			f << "\n\n\tSurface"
+				<< "\n\t{";
+			if (o.class_ == "Jupiter" || o.class_ == "Neptune")
+			{
+				f << "\n\t\tcolorLayer0\t\t" << o.colorLayer0.Print();
+				if (o.colorLayer1.r >= 0)
+				{
+					f << "\n\t\tcolorLayer1\t\t" << o.colorLayer1.Print();
+					if (o.colorLayer2.r >= 0)
+					{
+						f << "\n\t\tcolorLayer2\t\t" << o.colorLayer2.Print();
+						if (o.colorLayer3.r >= 0)
+						{
+							f << "\n\t\tcolorLayer3\t\t" << o.colorLayer3.Print();
+							if (o.colorLayer4.r >= 0)
+							{
+								f << "\n\t\tcolorLayer4\t\t" << o.colorLayer4.Print();
+								if (o.colorLayer5.r >= 0)
+								{
+									f << "\n\t\tcolorLayer5\t\t" << o.colorLayer5.Print();
+									if (o.colorLayer6.r >= 0)
+									{
+										f << "\n\t\tcolorLayer6\t\t" << o.colorLayer6.Print();
+										if (o.colorLayer7.r >= 0)
+										{
+											f << "\n\t\tcolorLayer7\t\t" << o.colorLayer7.Print();
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+			else
+				f << "\n\t\tcolorShelf\t\t" << o.colorBeach.Print()
+				<< "\n\t\tcolorBeach\t\t" << o.colorBeach.Print()
+				<< "\n\t\tcolorDesert\t\t" << o.colorLowland.Print()
+				<< "\n\t\tcolorLowland\t" << o.colorLowland.Print()
+				<< "\n\t\tcolorUpland\t\t" << o.colorUpland.Print()
+				<< "\n\t\tcolorRock\t\t" << o.colorUpland.Print();
+			f << "\n\t}";
+		}
+			
 	}
 
 	if (o.type != "Barycenter" && o.hydrogenMass < 0.01)
