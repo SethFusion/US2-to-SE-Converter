@@ -191,24 +191,28 @@ int main()
 			planetFile << "\n\n\t/*\tREAD ME!\n\n"
 				<< "\tIf you are opening this file because you noticed that some of the objects from your simulation were converted wrong,\n"
 				<< "\tyou will be able to fix them here. Because of the complicated nature of this conversion, it is impossible for every value\n"
-				<< "\tto be exact, so if you REALLY want all the numbers in this file to be 100% the same as from your simulation, you will\n"
-				<< "\tneed to go through every object and compare every value to the one you see in Universe Sandbox. However, most of the\n"
-				<< "\tvalues are close, so I will tell you what values are most likely to be inaccurate.\n\n"
+				<< "\tto be exact, so if you REALLY want all the numbers in this file to be 100% the same as your simulation, you will\n"
+				<< "\tneed to go through every object and compare every value to the one you see in Universe Sandbox. However, most of the values\n"
+				<< "\tare reasonably accurate, so I will tell you what values are most likely to be inaccurate so you don't waste time checking every number.\n\n"
 
-				<< "\tFirst off, if there were any binary objects in your simulation (stars orbiting each other, double planet systems, etc.), their\n"
+				<< "\tFirst off, you'll notice that every object here has an obliquity of 0 degrees. That is because I do not know how to calculate\n"
+				<< "\tthe obliquity from the parameters that Universe Sandbox provides. If you think YOU could figure it out, check out the code in\n"
+				<< "\tGitHub (https://github.com/SethFusion/US2-to-SE-Converter) and send me a message. If you figure it out, I'll be happy to push\n"
+				<< "\tchanges to the public. I want it to work just as much as you do :)\n\n"
+				
+				<< "\tSecondly, if there were any binary objects in your simulation(stars orbiting each other, double planet systems, etc.), their\n"
 				<< "\torbits will be the most inaccurate. You will need to find these objects (use ctrl + F) and look at their 'Orbits' tag. The first thing\n"
-				<< "\tto fix will be their eccentricity. You can find this value easily in US. ArgOfPericenter and MeanAnomaly are probably incorrect as well.\n"
+				<< "\tto fix will be their eccentricity. You can find this value easily in Universe Sandbox. ArgOfPericenter and MeanAnomaly are probably incorrect as well.\n"
 				<< "\tOf course, because these are binary objects, make sure their orbital parameters are EXACTLY the same (period, eccentricity, inclination, AscendingNode,\n"
-				<< "\tand MeanAnomaly) and make sure one of the objects has an ArgOfPericenter +/- 180 degrees from the other.\n\n"
+				<< "\tand MeanAnomaly) and make sure one of the objects has an ArgOfPericenter + or - 180 degrees from the other.\n\n"
 
 				<< "\tFor all other objects, there are some special cases where values are calculated incorrectly. If the Ascending Node of an object in US\n"
 				<< "\tis undefined, then you can ignore the value printed in this file, but it is likely that ArgOfPericenter and MeanAnomaly are both incorrect\n"
-				<< "\tas a result. You will need to fix them. If an object's Argument of Pericenter is undefined in US, then MeanAnomaly here is likely incorrect.\n"
-				<< "\tThere are other cases where the numbers look fine in US but are still broken here. And I'm sure there are even more cases that I couldn't test for.\n\n"
+				<< "\tas a result. You will need to fix them. If an object's Argument of Pericenter is undefined in US, then MeanAnomaly here is likely incorrect.\n\n"
 
-				<< "\tWhat I'm saying is, you need to check the AscendingNode, ArgOfPericenter, and MeanAnomaly for any object that looks wrong. To be honest, even\n"
-				<< "\tif it looks fine in Space Engine, it could still be wrong in this file. The more complicated your system is, the more inaccurate the numbers will\n"
-				<< "\tbe here. I hate that it has to be this way, but there is nothing I can do about it.\t*/\n\n\n";
+				<< "\tSo Obliquity, AscendingNode, ArgOfPericenter, and MeanAnomaly are the problem children if your object looks wrong. If it looks fine in Space Engine,\n"
+				<< "\tit probably IS fine. If you have 100+ objects, I wouldn't wast my time on small inaccuracies. And remember, the more complicated your system is, \n"
+				<< "\tthe more inaccurate the numbers will be here. I hate that it has to be this way, but there is nothing I can do about it.\t*/\n\n\n";
 			PrintFile(planetFile, *root);
 			planetFile.close();
 
@@ -676,9 +680,15 @@ void GetData(std::ifstream& inputFile)
 		holder.erase(holder.size() - 2, 2);
 		temp.name = holder;
 
-		// find albedo
-		while (inputFile >> holder && !(holder.find("\"Albedo\":") + 1) && !(holder.find("\"Id\":") + 1));
-		if (holder.find("\"Id\":") + 1) // If an object does not have an albedo, it skips the next few items because they don't exist either
+		if (temp.name == "Amphitrite")
+		{
+			int poop = 1;
+			poop++;
+		}
+
+		// find luminosity
+		while (inputFile >> holder && !(holder.find("\"Luminosity\":") + 1) && !(holder.find("\"Id\":") + 1));
+		if (holder.find("\"Id\":") + 1) // If an object does not have an luminosity, it skips the next few items because they don't exist either
 		{
 			temp.temp = 0;
 			temp.albedo = 0;
@@ -687,34 +697,14 @@ void GetData(std::ifstream& inputFile)
 			temp.luminosity = 0;
 			temp.roughness = 0;
 			temp.isStar = false;
-			goto NoAlbedo;
+			goto NoLum;
 		}
-		holder.erase(0, 9);
-		temp.albedo = std::stod(holder, &sz);
-
-		// find temperature
-		while (inputFile >> holder && !(holder.find("\"SurfaceTemperature\":") + 1));
-		holder.erase(0, 21);
-		temp.temp = std::stoi(holder, &sz);
-
-		// find greenhouse
-		while (inputFile >> holder && !(holder.find("\"GreenhouseEffect\":") + 1));
-		holder.erase(0, 19);
-		temp.greenhouse = std::stod(holder, &sz);
-
-		// find surface pressure
-		while (inputFile >> holder && !(holder.find("\"SurfacePressure\":") + 1));
-		holder.erase(0, 18);
-		temp.surfacePressure = std::stod(holder, &sz);
-		temp.surfacePressure /= 101325; // converts pa to atm
-
-		// find luminosity
-		while (inputFile >> holder && !(holder.find("\"Luminosity\":") + 1));
 		holder.erase(0, 13);
 		temp.luminosity = std::stod(holder, &sz);
 		temp.luminosity /= 3.827e26; // converts watts to solar lum
 
-		// find color stuff
+		// find color stuff TO-DO (maybe)
+		/*
 		while (inputFile >> holder && !(holder.find("\"Colors\":[") + 1));
 		if (inputFile >> holder && holder != "],") // object uses low/mid/high colors
 		{
@@ -743,7 +733,7 @@ void GetData(std::ifstream& inputFile)
 			inputFile >> holder;
 			temp.colorBeach.b = std::stod(holder, &sz);
 			inputFile >> holder;
-			temp.colorBeach.a = std::stod(holder, &sz);	
+			temp.colorBeach.a = std::stod(holder, &sz);
 		}
 		else // object has no colors or uses color layers
 		{
@@ -851,6 +841,7 @@ void GetData(std::ifstream& inputFile)
 				}
 			}
 		}
+		*/
 
 		// Find mass composition, if it exists
 		while (inputFile >> holder &&
@@ -893,7 +884,28 @@ void GetData(std::ifstream& inputFile)
 		holder.erase(0, 25);
 		temp.roughness = std::stod(holder, &sz);
 
-	NoAlbedo:;
+		// find temperature
+		while (inputFile >> holder && !(holder.find("\"SurfaceTemperature\":") + 1));
+		holder.erase(0, 21);
+		temp.temp = std::stoi(holder, &sz);
+
+		// find albedo
+		while (inputFile >> holder && !(holder.find("\"Albedo\":") + 1));
+		holder.erase(0, 9);
+		temp.albedo = std::stod(holder, &sz);
+
+		// find greenhouse
+		//while (inputFile >> holder && !(holder.find("\"GreenhouseEffect\":") + 1));
+		//holder.erase(0, 19);
+		//temp.greenhouse = std::stod(holder, &sz);
+
+		// find surface pressure
+		//while (inputFile >> holder && !(holder.find("\"SurfacePressure\":") + 1));
+		//holder.erase(0, 18);
+		//temp.surfacePressure = std::stod(holder, &sz);
+		//temp.surfacePressure /= 101325; // converts pa to atm
+
+		NoLum:
 
 		// find mass, isStar, type, shape
 		while (inputFile >> holder && !(holder.find("\"Mass\":") + 1));
@@ -983,6 +995,9 @@ void GetData(std::ifstream& inputFile)
 		holder.erase(0, 12);
 		holder.erase(holder.size() - 1, 1);
 		temp.class_ = holder;
+
+		temp.surfacePressure = 0;
+		temp.greenhouse = 0;
 
 		// add object to global vector, ignoring US2 barycenters (which have R=1m, M=1kg) and nameless fragments
 		if (temp.name != "" && temp.radius != 0.001)
@@ -1082,7 +1097,7 @@ void PrintFile(std::ofstream& f, Object & o)
 			<< "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
 			<< "\n\tRadius\t\t\t\t" << o.radius
 			<< "\n\tRotationPeriod\t\t" << o.rotationPeriod
-			<< "\n\tObliquity\t\t\t" << ((o.obliquity < -180) ? 0.0 : o.obliquity)
+			<< "\n\tObliquity\t\t\t0.0" //<< ((o.obliquity < -180) ? 0.0 : o.obliquity)
 			<< "\n}\n\n";
 		for (int i = 0; i < o.child.size(); i++)
 			PrintFile(f, *o.child.at(i));
@@ -1096,7 +1111,7 @@ void PrintFile(std::ofstream& f, Object & o)
 		f << "\n\tMass\t\t\t\t" << o.mass / (5.9736 * pow(10, 24))
 			<< "\n\tRadius\t\t\t\t" << o.radius
 			<< "\n\tRotationPeriod\t\t" << o.rotationPeriod
-			<< "\n\tObliquity\t\t\t" << o.obliquity;
+			<< "\n\tObliquity\t\t\t0.0"; //o.obliquity;
 		if (o.type == "Star")
 			f << "\n\tLum\t\t\t\t\t" << o.luminosity
 				<< "\n\tTeff\t\t\t\t" << o.temp;
@@ -1113,7 +1128,8 @@ void PrintFile(std::ofstream& f, Object & o)
 				<< "\n\t\tMetals\t\t" << o.ironMass
 				<< "\n\t}";
 
-			f << "\n\n\tSurface"
+			// color stuff
+			/*f << "\n\n\tSurface"
 				<< "\n\t{";
 			if (o.class_ == "Jupiter" || o.class_ == "Neptune")
 			{
@@ -1154,11 +1170,13 @@ void PrintFile(std::ofstream& f, Object & o)
 				<< "\n\t\tcolorLowland\t" << o.colorLowland.Print()
 				<< "\n\t\tcolorUpland\t\t" << o.colorUpland.Print()
 				<< "\n\t\tcolorRock\t\t" << o.colorUpland.Print();
-			f << "\n\t}";
+			f << "\n\t}";*/
 		}
 			
 	}
 
+	// Atmosphere stuff, which is now missing from the US simulation file
+	/*
 	if (o.type != "Barycenter" && o.hydrogenMass < 0.01)
 	{
 		f << "\n\n\tAtmosphere"
@@ -1166,7 +1184,7 @@ void PrintFile(std::ofstream& f, Object & o)
 			<< "\n\t\tPressure\t\t" << o.surfacePressure
 			<< "\n\t\tGreenhouse\t\t" << o.greenhouse
 			<< "\n\t}";
-	}
+	}*/
 
 	f << "\n\n\tOrbit"
 		<< "\n\t{"
