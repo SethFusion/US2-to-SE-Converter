@@ -38,7 +38,7 @@ class Color
 public:
 	double r, g, b, a;
 
-	Color(double x = -1.0, double y = 0.0, double z = 0.0, double w = 0.0)
+	Color(double x = 0.0, double y = 1.0, double z = 0.0, double w = 1.0)
 	{
 		r = x;
 		g = y;
@@ -680,12 +680,6 @@ void GetData(std::ifstream& inputFile)
 		holder.erase(holder.size() - 2, 2);
 		temp.name = holder;
 
-		if (temp.name == "Amphitrite")
-		{
-			int poop = 1;
-			poop++;
-		}
-
 		// find luminosity
 		while (inputFile >> holder && !(holder.find("\"Luminosity\":") + 1) && !(holder.find("\"Id\":") + 1));
 		if (holder.find("\"Id\":") + 1) // If an object does not have an luminosity, it skips the next few items because they don't exist either
@@ -1129,7 +1123,8 @@ void PrintFile(std::ofstream& f, Object & o)
 				<< "\n\t}";
 
 			// color stuff
-			/*f << "\n\n\tSurface"
+			/*
+			f << "\n\n\tSurface"
 				<< "\n\t{";
 			if (o.class_ == "Jupiter" || o.class_ == "Neptune")
 			{
